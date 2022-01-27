@@ -1,202 +1,99 @@
 #FcY association testing ####
 
+library("data.table")
+library("dplyr")
+library("ggplot2")
+
 setwd("~/GWAS/all_enteric/clean_data/post-impute/Plink")
 # FcY Range :) -chr 1 --from-bp 1161504430 --to-bp 161729143
+#RS IDs updated using pos2RsID use Fcy_rs files
 
-#GLM uses logistic regression model
-#The 'firth-fallback' modifier requests logistic regression, followed by Firth regression whenever the logistic regression fails to converge. This is now the default.
+#GLM uses logistic regression model.
 #1 binary phenotype loaded (173 cases, 139 controls).
 #9 covariates loaded from pca_covar.txt.
 
-
 #No LD pruning ####
 #Includes Typhoid/Paratyphoid and Vaccinated individuals
+#Need to formally assess covariate weighting still
 
-system("./plink2 --pfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4 --covar-variance-standardize --glm --out enteric_assoc")
+system("./plink2 --pfile Fcy_rs --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4 --covar-variance-standardize --glm --out Fcy")
 
-gwasResults <- fread("enteric_assoc.Diagnosed.glm.logistic.hybrid")
-
+gwasResults <- fread("Fcy.Diagnosed.glm.logistic.hybrid")
 gwasResults$TEST <- as.factor(gwasResults$TEST)
-
 gwasResults <- filter(gwasResults, TEST == "ADD")
-
 #487 SNPs tested in region
 
 #Rename cols
 colnames(gwasResults) <- c("CHR", "BP", "SNP", "REF", "ALT", "A1","FIRTH?","TEST","OBS_CT","OR", "LOG(OR)_SE","Z_STAT","P","ERRCODE")
-
 #Add bonferrnoni column
-
-gwasResults <- mutate(gwasResults, Bonf = P *487) # should be 487 testing 26
+gwasResults <- mutate(gwasResults, Bonf = P *487)
 
 #sort by P value
 sig <- filter(gwasResults, P <0.05) #73
 MTsig <- filter(gwasResults, Bonf <0.05) 
 
-#with the *26 bonferroni correction one snp is significant still
-#161722364 chr1:161722364:T:C
-
-#without LD pruning no significant results under multiple testing :(
+# None currently meet MT, however this is without pruning so not accurate filtering. With the *26 post-LD bonferroni correction, one snp is significant still #161722364 chr1:161722364:T:C
 
 #6 SNPs with P <0.01
-sig <- filter(gwasResults, P <0.001)
+sig <- filter(gwasResults, P <0.01)
 
 #Basic LD pruning and assoc test ####
 
-system("./plink2 --pfile enteric_LD --chr 1 --from-bp 161504430 --to-bp 161729143 --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4, PC5 --covar-variance-standardize --glm --out Fc_LD")
+#Prune Fcy_Rs
+system("./plink2 --pfile Fcy_rs --indep-pairwise 50 5 0.2 --out Fcyrs_LD")
 
-#26 Varients
+system("./plink2 --pfile Fcy_rs --extract Fcyrs_LD.prune.in --make-pgen --out Fcy_rs_LD")
+#31 varients
+#LD pruning does not prioritise snps of significance, see snp_annotating.R and association_testing.R for attempts to overcome this
+
+system("./plink2 --pfile Fcy_rs_LD --chr 1 --from-bp 161504430 --to-bp 161729143 --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4, PC5 --covar-variance-standardize --glm --out Fc_LD")
 
 gwasResults <- fread("Fc_LD.Diagnosed.glm.logistic.hybrid")
-
 gwasResults$TEST <- as.factor(gwasResults$TEST)
-
 gwasResults <- filter(gwasResults, TEST == "ADD")
 
 #Rename cols
 colnames(gwasResults) <- c("CHR", "BP", "SNP", "REF", "ALT", "A1","FIRTH?","TEST","OBS_CT","OR", "LOG(OR)_SE","Z_STAT","P","ERRCODE")
 
-gwasResults <- mutate(gwasResults, Bonf = P *26)
+gwasResults <- mutate(gwasResults, Bonf = P *31)
 
 #sort by P value
-sig <- filter(gwasResults, P <0.05) #4
-MTsig <- filter(gwasResults, Bonf <0.05) # 0
-
-#without LD pruning no significant results under multiple testing :(
+sig <- filter(gwasResults, P <0.05) #3 (previous LD had 4)
+MTsig <- filter(gwasResults, Bonf <0.05)
 
 #2 SNPs with P <0.01
 sig <- filter(gwasResults, P <0.01)
 
-#Adding adjust flag ####
+#even compared to a different LD run (used whole genome), sig snps have been pruned #come back to this
 
-system("./plink2 --pfile enteric_LD --chr 1 --from-bp 161504430 --to-bp 161729143 --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4, PC5 --covar-variance-standardize --glm --adjust --out Fc_LD")
+#Adding adjust flag ##
 
-#genomic inflation super high 3.5 I will need to fix this :/
-#acc makes sense because there are a lot of sig snps more so than you'd expect this isnt the genomic inflation factor of the whole genome
+system("./plink2 --pfile Fcy_rs_LD --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4, PC5 --covar-variance-standardize --glm --adjust --out Fc_LD")
 
-gwasResults <- fread("Fc_LD.Diagnosed.glm.logistic.hybrid.adjusted")
-
-
-#Notes ####
+#Notes 26/01/22 ####
 #So far these results are randomly pruned for linkage disequilibrium, could miss out on the more significant SNPs see snp_annotating script and haploview for extensions
-
 #For now let's visualize our top snps with no pruning/prioritisation
 
 #SNP Case-Control Plotting ####
 
-#Do top 'protective' SNP and top suscepitible SNP
+#Plot top 'protective' SNP and top suscepitible SNP
 #Case control analysis 
 
+#Steps ####
 
-#Filter original PED file (this has genotype information for SNPs of interest)
-#Merge with pheno file
-#Plot SNP genotype by cases and controls :)
-
-#Steps
-
-#Update genotype information to RsID ####
-
+#Update genotype information to RsID 
 #see pos2rsID script
 #Use Fcy_rs pgen files
-
-
-
-#make Fc Ped files
-
-system("./plink2 --pfile enteric_LD --chr 1 --from-bp 161504430 --to-bp 161729143 --make-bed --out Fcy")
-
-system("./plink --bfile Fcy --recode --out Fcy")
-
-  bim <- fread("Fcy.bim")
-  
-#try get frequency from --fisher
-  #turn frequency into counts mutate 
-
-system("./plink2 --pfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --make-pgen --out Fcy") #487 varients
-
-system("./plink2 --pfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --make-bed --out Fcy")
-
-system("./plink2 --pfile Fcy --geno-counts")
-
-counts <- fread("plink2.gcount")
-
-system("./plink --bfile Fcy --pheno pheno_plink1.txt --pheno-name Diagnosed --allow-no-sex --assoc counts")
-
-counts <- fread("plink.assoc")
-
-system("./plink --bfile Fcy --pheno pheno_plink1.txt --pheno-name Diagnosed --allow-no-sex --assoc")
-
-freq <- fread("plink.assoc")
-
-#Allele 1 is usually minor
-#C_A	Allele 1 count among cases
-#C_U	Allele 1 count among controls
-
-sig_counts <- filter(counts, P < 0.01)
-
-#Merge Fc Ped with pheno_update.txt
+#Get genotype case control info from --hardy
 #Filter for sig SNPs
 #Recode poss
 #Make stacked bar chart
 ggplot(data=df2, aes(x=dose, y=len, fill=supp)) +
   geom_bar(stat="identity")
 
-#try use original ped file? #wont be merged
-#output from imputation was vcf.gz, merged files then converted to bed > pgen
-
-
-#convert enteric_QC.bed
-
-system("./plink --bfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --make-bed --out Fcy") #--recode --tab 
-test <- fread("test.ped")
-
-
-#BEDMatrix ####
-install.packages("remotes")
-remotes::install_github("QuantGen/BEDMatrix")
-library(BEDMatrix)
-
-m2 <- BEDMatrix("~/GWAS/all_enteric/clean_data/post-impute/Plink/test", n = NULL, p = NULL, simple_names = TRUE)
-
-colnames(m2)
-colnames(m[,5:10])
-rownames(m2)
-
-m[1:4,400] #what are 0 1 2 encodings
-
-#in the data it is obvious that C is the major allele, and T is the minor allele. So CC is coded as 0, CT is 1,and TT 2.
-#I think 0 is homozygous for minor allele, 1 is hetro, 2 is homozygous
-
-#try plotting for SNP chr1:161722364:T:C #have to add _C
-#Major allele is T, Ref/Minor is C
-
-vector <- m[, "chr1:161722364:T:C_C"]
-
-df <- as.matrix(m2)
-df <- as.data.frame(df)
-
-#need to left join with phenocolumn
-pheno <- fread("pheno_update.txt") #IDs are different 
-
-
-#Hardy option ####
-
-#plink 1.9, check plink 2
---hardy
-
-system("./plink --bfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --make-bed --out Fcy")
-
-system("./plink --bfile Fcy --pheno pheno_plink1.txt --pheno-name Diagnosed --allow-no-sex --hardy") 
-
-#227 phenotype values present after --pheno
-
-hardy <- fread("plink.hwe")
-
-hardy <- hardy[,1:6]
-
 #Plink2 version hardy ####
 
-system("./plink2 --pfile Fcy --pheno pheno_update.txt --pheno-name Diagnosed --hardy --keep-if Diagnosed == 1 --out nTD")#139 controls
+system("./plink2 --pfile Fcy_rs --pheno pheno_update.txt --pheno-name Diagnosed --hardy --keep-if Diagnosed == 1 --out nTD")#139 controls
 
 nTD <- fread("nTD.hardy")
 
@@ -206,24 +103,60 @@ system("./plink2 --pfile Fcy_rs --pheno pheno_update.txt --pheno-name Diagnosed 
 
 TD <- fread("TD.hardy")
 
+#27/01/22 Notes ####
+# Updating script to stick with PLINK2 and use the Fcy_rs files #Also deleting binary code conversion matrix
+# Assoc counts/frequency option don't work either, as the output does not split by genotype.
+#The only option I can find that does is --hardy. SNPtest might also be better suited
+
+#Merging TD nTD ####
+#Need to reformat into one dataframe that we can plot 
+#Merging will add .x .y suffix to colnames, add suffix option of .case for example when merging dataframes
+#might need to split into separate observations so same sample repeated then a code column for case/control wide >long
+
+#remove extra cols for now
+nTD <- nTD[,2:7]
+TD <- TD[,2:7]
+
+#Merge hardy results ####
+genotype <- left_join(nTD, TD, by = "ID", suffix = c(".cont",".case"))
+
+#split into long format
+#Actually because I hate reformatting adding column Pheno to both dataframes, then binding
+
+pheno <- rep("Cont",487)
+nTD$pheno <- pheno
+pheno <- rep("Case",487)
+TD$pheno <- pheno
+
+genotype <- bind_rows(nTD, TD)
+#double check it keeps same ref alt allele in each
+
+#Plotting ####
+
+#Current, most sig 'protective' SNP
+#rs11590932 OR 0.4
+
+#y axis we would want to be counts format to long again
+geno <- melt(genotype, id.vars = c("ID", "pheno"), measure.vars = c(4:6))
+
+colnames(geno) <- c("ID", "pheno", "genotype", "count")
+geno$pheno <- as.factor(geno$pheno)
+
+#Protective SNPs Plots ####
+geno %>% filter(ID == "rs11590932") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat = "identity") + theme_light()
+#Having 1 copy of the allele het higher in controls than cases
+#Same for two copies of the allele
+
+geno %>% filter(ID == "rs180978155") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat = "identity") + theme_light()
 
 
+#Susceptibility SNP plots ####
+geno %>% filter(ID == "rs12040409") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat = "identity") + theme_light()
+#Having Ax (minor) allele is much more associated with case of typhoid fever
+#You'd want first column to be somewhat even
+#then looking at the effects as the SNP occurs either one allele (het/two alleles) that increases the likelihood of case of typhoid fever
 
-#SNPtest ####
+#Also test rs115297732, rs10917740, rs12040409, rs796681563
+#these are in LD with eachother I think
 
-#Background ####
-#Plink2 does not support visualisation of allele types by individual snp/case control very well
-#Previous method used ped files but back conversion from PLINK2 to PED is very tricky and also the code used to visualise ped/pheno data wasn't great either
-
-#Intergrate downstream analysis with SNPtest
-#So use PLINK for processing of data and genome/region wide summary statistics
-#Pass important/significant snps into SNPtest
-#Breaks down SNPs by genotype etc.
-#requires bgen format
-
-#Convert to BGEN ####
-./plink2 --bfile enteric_QC --chr 1 --from-bp 161504430 --to-bp 161729143 --make-bed --out Fcy
-
-#Github code
-
-
+#Polygenic Risk score, haplotypes, FcAR still to go...
