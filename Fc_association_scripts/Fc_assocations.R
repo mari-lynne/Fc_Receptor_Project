@@ -160,3 +160,25 @@ geno %>% filter(ID == "rs12040409") %>% ggplot(aes(x=genotype, y=counts, fill=ph
 #these are in LD with eachother I think
 
 #Polygenic Risk score, haplotypes, FcAR still to go...
+
+#Just Typhoid ####
+
+system("./plink2 --pfile Fcy_rs --pheno pheno_update.txt --pheno-name Diagnosed --covar pca_covar.txt --covar-name Sex, Challenge, Dose, Vaccine, Age, PC1, PC2, PC3, PC4, PC5, --remove-if Challenge == 3 --covar-variance-standardize --glm --out fcy_ty")
+
+gwasResults <- fread("fcy_ty.Diagnosed.glm.logistic.hybrid")
+#Filter TEST
+gwasResults$TEST <- as.factor(gwasResults$TEST)
+gwasResults <- filter(gwasResults, TEST == "ADD")
+sig <- filter(gwasResults, P <0.05)
+
+#rs115297732 #susceptible ##
+geno %>% filter(ID == "rs115297732") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat = "identity") + theme_light()
+
+#rs11590932
+geno %>% filter(ID == "rs11590932") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat = "identity") + theme_light()
+
+levels(geno$genotype) <- c("0", "1", "2")
+levels(geno$pheno) <- c("TD", "nTD")
+
+geno %>% filter(ID == "rs115297732") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat="identity", color="black", position=position_dodge()) + theme_light()
+
