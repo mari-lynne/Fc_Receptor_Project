@@ -180,5 +180,6 @@ geno %>% filter(ID == "rs11590932") %>% ggplot(aes(x=genotype, y=counts, fill=ph
 levels(geno$genotype) <- c("0", "1", "2")
 levels(geno$pheno) <- c("TD", "nTD")
 
+#dodged graph ##
 geno %>% filter(ID == "rs115297732") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat="identity", color="black", position=position_dodge()) + theme_light()
 
