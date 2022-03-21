@@ -119,3 +119,9 @@ pheno_express <- rbind(T1, T2)
 pheno_express <- select(pheno_express, - SampleID)
 pheno_express <- rename(pheno_express, Sample_ID = Part_number)
 
+write.table(pheno_express, file = "~/GWAS_22/Fc_receptor/data/pheno_express_T1T2.txt", row.names = F, quote = F, sep = "\t")
+
+#Format for cybersort/matrixEQTL ####
+
+#Make contrast matrix DEG
+#See the pattern in FcGR expression over time
