@@ -84,7 +84,7 @@ exprs_names <- c(first_cols, ID_cols)
 names(exprs) <- exprs_names
 
 #Transpose so can join to pheno_data
-exprs2 <- exprs[,30:605]
+exprs2 <- exprs[,30:594]
 exprs2 <- t(exprs2)
 names(exprs2) <- exprs2[1,]
 exprs2 <- as.data.frame(exprs2)
@@ -109,19 +109,34 @@ T1$SampleID <- T1_IDs
 T2 <- filter(pheno_express, StudyArm != "T1")
 
 names <- (T2$SampleID)
-#need to search for 3 or 4 consequtive numbers
+#need to search for 3 or 4 consecutive numbers
 #P{m,n}	Between m and n instances of P
 T2_IDs <- str_extract(names, regex("([\\d]{2,4})"))
 T2$SampleID <- T2_IDs #double check T2 Ids with part number
 pheno_express <- rbind(T1, T2)
 
-#Use Part number insted
+#Use Part number instead #####
 pheno_express <- select(pheno_express, - SampleID)
 pheno_express <- rename(pheno_express, Sample_ID = Part_number)
 
-write.table(pheno_express, file = "~/GWAS_22/Fc_receptor/data/pheno_express_T1T2.txt", row.names = F, quote = F, sep = "\t")
+#write.table(pheno_express, file = "~/GWAS_22/Fc_receptor/data/pheno_express_T1T2.txt", row.names = F, quote = F, sep = "\t")
+
+table <- fread("~/GWAS_22/Fc_receptor/data/pheno_express_T1T2.txt")
 
 #Format for cybersort/matrixEQTL ####
 
 #Make contrast matrix DEG
+
+library(limma)
+library(edgeR)
+table
+
+#Make targets file for design matrix
+
+#This is essentially the metadata 
+
+
+
+
+
 #See the pattern in FcGR expression over time
