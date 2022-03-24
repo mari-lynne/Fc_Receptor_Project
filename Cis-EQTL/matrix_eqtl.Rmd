@@ -53,3 +53,9 @@ write.table(fc_geno, file="fcy.sample", row.names = F, quote = F, sep = " ")
 #This is our geno file for matrix-eqtl 
 ```
 
+```{r Format expression file}
+
+
+
+```
+
