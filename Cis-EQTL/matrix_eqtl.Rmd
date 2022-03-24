@@ -1,0 +1,55 @@
+---
+title: "matrixEQTL"
+author: "Mari Johnson"
+date: "24/03/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = '~/GWAS_22/Fc_receptor/data')
+```
+
+### Aims
+- Format PLINK data for input into MatrixEQTL R programme
+- Format previously estimated log2FC expression data for EQTL
+- Run MatrixEQTL
+- Get list of significant eQTLs in FCR region
+- Eventually run for genome wide eQTL analysis, focus on 'top' snps
+- Plot data for significant SNPs
+
+
+```{bash Format Plink Data}
+
+#Use all_enteric_QC data set
+
+plink2 --bfile all_enteric_QC2 --recode oxford --out ox_enteric
+plink --data ox_enteric --allow-no-sex --recode A-transpose --out traw_enteric
+cat traw_enteric.traw | cut -f2,7- > geno_file
+# Remove intermediate files:
+rm -f *ped *hh *nosex *traw *map
+
+```
+
+```{r make sample data}
+library(data.table)
+library(dplyr)
+sample <- fread("ox_enteric.csv")
+
+write.table(sample, file="ox_enteric.sample", row.names = F, quote = F, sep = " ")
+#geno_file has the data organised by snps (rows), participants (cols) - recoded 1-0
+#Filter for fcyr genes
+
+fcyr <- fread("~/GWAS_22/new_gwas/Post-imp/Merged/Assoc/T_fcy.txt")
+geno <- fread("~/GWAS_22/Fc_receptor/data/geno_file")
+
+fcyr <- fcyr[,3]
+
+fc_geno <- left_join(fcyr, geno, by = "SNP")
+#remove zero
+names(fc_geno) <- gsub(pattern = "0_", replacement = "", x = names(fc_geno))
+
+write.table(fc_geno, file="fcy.sample", row.names = F, quote = F, sep = " ")
+#This is our geno file for matrix-eqtl 
+```
+
