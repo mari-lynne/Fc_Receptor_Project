@@ -78,6 +78,8 @@ filtered_genes <- filtered_genes %>% dplyr::select(id, chromosome_name, start_po
 write.table(filtered_genes, "gene_loc.txt")
     
 
+
+
 ### snp locations ###
 
 snp_loc <- read.csv(file = "snp_loc.csv")
