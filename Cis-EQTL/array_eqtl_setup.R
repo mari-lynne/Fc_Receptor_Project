@@ -33,7 +33,6 @@ T1_T2_autosomes[1:10,] #575 features (as there are multiple time points)
 
 
 gene_names <- featureNames(T1_T2_autosomes)
-
 gene_names <- as.data.frame(gene_names) #ENS transcripts 
 
 #https://www.bioconductor.org/packages/devel/bioc/vignettes/Biobase/inst/doc/ExpressionSetIntroduction.pdf
@@ -53,7 +52,6 @@ metadata <- data.frame(labelDescription= meta_names, row.names= meta_names) #cou
 
 #AnnotatedDataFrame that conveniently stores and manipulates the phenotypic data and its metadata in a coordinated fashion. Create and view an AnnotatedDataFrame instance with:
 phenoData <- new("AnnotatedDataFrame", data=pData(T1_T2_autosomes), varMetadata=metadata)
-
 head(pData(phenoData))
 
 pheno <- data.frame(pData(phenoData))

@@ -42,7 +42,6 @@ write.table(sample, file="ox_enteric.sample", row.names = F, quote = F, sep = " 
 
 fcyr <- fread("~/GWAS_22/new_gwas/Post-imp/Merged/Assoc/T_fcy.txt")
 geno <- fread("~/GWAS_22/Fc_receptor/data/geno_file")
-
 fcyr <- fcyr[,3]
 
 fc_geno <- left_join(fcyr, geno, by = "SNP")

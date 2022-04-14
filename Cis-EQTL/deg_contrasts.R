@@ -26,17 +26,25 @@ symbol <- tibble::rownames_to_column(symbol, "E_ID")
 tableexp <- tibble::rownames_to_column(exprs, "E_ID")
 symbol_exprs <- left_join(symbol,tableexp, by = "E_ID") %>% select(-E_ID)
 
-#transpose data frame
+library(stringi)
+
+#update colnames
 df_t <- transpose(symbol_exprs)
-gnames <- df_t[1,] %>% as.vector(mode = "character") #update colnames
+gnames <- df_t[1,] %>% as.vector(mode = "character")
 names(df_t) <- gnames
 df_t <- df_t[-c(1),] 
 
 #Bind tables ####
 pheno_exprs <- cbind(pData, df_t)
+write.table(pheno_exprs, file = "~/GWAS_22/Fc_receptor/data/gene_exprs_T1T2.txt", row.names = F, quote = F, sep = "\t")
+
+
+##########################################
 
 #Filter
 T0_12h <- filter(pheno_exprs, Time == "0"| Time == "0.5")
+
+
 
 #Prepare data for DEG analysis ####
 pData2 <- T0_12h[,1:12]
