@@ -1,0 +1,296 @@
+---
+title: "Matrix-eQTL FcR Analysis"
+author: "Mari Johnson"
+date: "20/04/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_knit$set(root.dir = '~/GWAS_22/Fc_receptor/data')
+```
+
+### Overal Aims
+- Format PLINK data for input into MatrixEQTL R programme
+- Format microarray gene expression data for mEQTL
+- Run MatrixEQTL
+- Get list of significant eQTLs in FCR region
+- Eventually run for genome wide eQTL analysis, focus on 'top' snps
+- Plot data for significant SNPs
+
+**Possible associations to run**
+
+- Can either compare normalised expression values or Log2FC
+- For now we are starting with correlating participant genotype info with D7 time point
+- Day 7 see's the most pertubation of FcR gene expression, and is around time of diagnosis
+- Will also look at day 1 expression 
+
+
+```{r Libraries, warning=FALSE, message=FALSE}
+#Library 
+library(data.table)
+library(tidyr)
+library(dplyr)
+library(limma)
+library(stringr)
+library(ggplot2)
+library(factoextra)
+library(tidylog)
+library(ggpubr)
+library(tibble)
+library(stringr)
+library(MatrixEQTL)
+library(biomaRt)
+
+#Functions ####
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+```
+
+#### Format genotyping data for matrix eQTL:
+See example data sets at http://www.bios.unc.edu/research/genomic_software/Matrix_eQTL/Sample_Data/
+
+**Steps:**
+- Recode SNPs to 0,1s using oxford format in PLINK
+- Transpose dataframe
+- In this study we are then filtering for just FcR SNPs, but you could also use this to do SNPs across the genome
+
+```{bash Format Plink Data}
+
+#Reformat enteric QC data set:
+
+#Recode SNPs as 1's and 0's
+plink2 --bfile all_enteric_QC2 --recode oxford --out ox_enteric
+#Transpose table so SNPs are rows, participants ar columns
+plink --data ox_enteric --allow-no-sex --recode A-transpose --out traw_enteric 
+cat traw_enteric.traw | cut -f2,7- > geno_file #cut relevant data from new file
+
+# Remove intermediate files:
+rm -f *ped *hh *nosex *traw *map
+
+```
+```{r Format genotype data}
+sample <- fread("ox_enteric.csv") #Contains sample IDs from .fam file
+
+#Filter geno data for just FcR snps of interest
+fcr <- fread("~/GWAS_22/new_gwas/Post-imp/Merged/Assoc/T_FcRs.txt") #Sig SNPs from assoc analysis
+geno <- fread("~/GWAS_22/Fc_receptor/data/geno_file") #Reformated genotyping data
+
+fcr <- fcr[,3] #Just get SNP name
+fc_geno <- left_join(fcr, geno, by = "SNP") #filter by joining
+
+#remove zero's from sample IDs
+#(added from merging of IID and FID, check earlier plink settings to avoid in future)
+names(fc_geno) <- gsub(pattern = "0_", replacement = "", x = names(fc_geno))
+
+write.table(fc_geno, file="fcr.sample", row.names = F, quote = F, sep = " ")
+#This is our geno file for matrix-eqtl 
+```
+
+#### Format micro-array data for eQTL analysis
+
+- Micro-array data normalised and qc steps performed by Daniel O'Conner
+- Data from T1 and T2 enteric challenge studies, T2 study also tested efficacy of live oral typhoid vaccines
+- Saved as an eset object which can be subsetted to get expression and accompanying metadata
+https://www.rdocumentation.org/packages/Biobase/versions/2.32.0/topics/ExpressionSet
+
+**Steps:**
+
+- Link microarray IDs with genotyping IDs, as they are different
+- Update gene names from ESNIDs to recognisable names
+- Select single time point to run mEQTL with/Split data into sepearate time point sets
+- Filter microarray data to include just the genotyping participants (not all T1 participants were genotyped/ommited from QC)
+- Following data cleaning we can the transpose the selected expression data into matrixEQTL format
+
+```{r Format expression file}
+
+# 1) Set up micro-array pheno data/IDs #### 
+#Load micro-array data T1T2
+load("T1_T2_with_T2_samples_rsn.norm.fil.eSet.Ensembl_ID_AVE_collapsed_autosomes_2021-04-28.R",envir = .GlobalEnv)
+pData <- pData(T1_T2_autosomes)
+#Make new typhoid diagnosis variable, na's = 0
+pData <- pData %>% mutate(Diagnosis = ifelse(is.na(pData$Day.of.typhoid.diagnosis..from.challenge), 0, 1))
+#Rename vars
+names(pData)[names(pData) == "Days.since.challenge"] <- "Time"
+
+#Add genotyping IDs to pData
+#Match geno ID by participant ID
+IDlink <- fread("meta/T1T2_IDlink.csv")
+#Rename ID col so can join appropriately
+IDlink <- rename(IDlink, Part_number = PARTICIPANT_ID) %>%
+  select(-Diagnosed, -Study)
+#Don't filter individuals unitl the end to keep table structure intact
+pData <- left_join(pData, IDlink, by = "Part_number") %>% select(-Meta_ID)
+
+
+# 2a) Set up gene expression data ####
+#Subset exprs data, rename genes, bind to updated pData
+exprs <- as.data.frame(exprs(T1_T2_autosomes))
+
+# 2b) update gene names ####
+names <- as.data.frame(fData(T1_T2_autosomes))
+symbol <- select(names, Symbol)    
+#Rows with ENS IDs currently aren't a column variable so we can't update, reformat :)
+symbol <- tibble::rownames_to_column(symbol, "E_ID")
+exprs <- tibble::rownames_to_column(exprs, "E_ID")
+#Add gene name (symbol column)
+symbol_exprs <- left_join(symbol, exprs, by = "E_ID") %>% select(-E_ID)
+
+#Transpose exprs data so we can bind exprs data with pData
+df_t <- transpose(symbol_exprs)
+names(df_t) <- df_t[1,] %>% as.vector(mode = "character")
+df_t <- df_t[-c(1),] 
+
+# 2c) Bind tables ####
+pheno_exprs <- cbind(pData, df_t)
+#write.table(pheno_exprs, file = "~/GWAS_22/Fc_receptor/data/gene_exprs_T1T2.txt", row.names = F, quote = F, sep = "\t")
+rm(names, symbol, dft_t)
+
+# 3a) Filter for Fc Receptor genes ####
+#Note error with duplicate names FCGR2A" at locations 12 and 13 when using dplyr #grep work around easiest for now
+Fc_exprs <- pheno_exprs[,grep ("^FCR|FCG|FCAR", colnames(pheno_exprs), value = TRUE,)]
+Fc_exprs <-sapply(Fc_exprs, as.numeric)
+Fc_exprs <- cbind(pData, Fc_exprs)
+
+# 3b) Recode variables ####
+Fc_exprs$Time<- as.numeric(Fc_exprs$Time)
+Fc_exprs$Array_experiment <- as.factor(Fc_exprs$Array_experiment)
+Fc_exprs$Ancestry <- as.factor(Fc_exprs$Ancestry)
+Fc_exprs$StudyArm <- as.factor(Fc_exprs$StudyArm)
+Fc_exprs$Sex <- as.factor(Fc_exprs$Sex)
+Fc_exprs$Diagnosis <- as.factor(Fc_exprs$Diagnosis)
+
+
+# 4) Filter data for relevant genes, time points, and participants ####
+
+#Both for mEQTL and plotting it is useful to have separate observations for each participants Fc gene expression
+#Need data grouped by FcR then with a time point variable
+#long to wide = spread
+#wide to long = gather, #gather . gather(data, key, value, ...)
+#where data is the dataframe you are working with.
+#key is the name of the key column to create (new grouping variable)
+#value is the name of the value column to create (measurement/observation variable)
+#... is a way to specify what columns to gather from.
+
+# 4b) Format data to long, for plotting see Plot script 
+Fc_interest <- gather(Fc_exprs, key = Fc_Receptor, value = Exprs, 16:28) %>% #Just keep FcRs relevant to study 
+filter(Fc_Receptor %!in% c("FCRL2", "FCRL3","FCRL5","FCRL6","FCGR2A.1","FCGBP","FCGRT")) %>% 
+filter(Time == "0") %>% #select time point of interest
+drop_na(GENOTYPING_ID) #Select just Genotyping participants
+# Note: Double check differences between 2A and 2A.1, different transcripts of FCGR2A receptor, maybe use most up to date one
+
+```
+#### Tidy and transpose data for mEQTL
+
+- Ensure that expression, covariate, and genotyping data is set up for mEQTL
+- Check that sample columns are all ordered the same across data sets
+- Save tables 
+
+```{r mEQTL formatting}
+
+# 5 Transpose exprs data into matrix eQTL format: ####
+#SNPs/Exprs/Covar data = rows, Sample IDs = cols
+
+#Get columns of interest
+m_exprs <-  Fc_exprs %>% select(c("GENOTYPING_ID","FCAR","FCGR1B","FCGR2A","FCGR3A","FCRLA","FCRLB","Time")) %>% 
+filter(Time == "0") %>% #select time point of interest
+drop_na(GENOTYPING_ID) %>%
+  select(-Time) #Select just Genotyping participants
+
+#Transpose data frame and update names
+m_exprs <- as.data.frame(t(m_exprs)) 
+names(m_exprs)<- m_exprs[1,] %>% as.vector(mode = "character") #subset first row to get names
+m_exprs <- m_exprs[-c(1),]
+m_exprs <- m_exprs %>% rownames_to_column(var = "id")
+#Turn into function later #Or if there is an easier way let me know! 
+
+
+# 6 Recode, filter and order covariate data ####
+covar <- Fc_exprs %>% filter(Time == "0") %>%
+  dplyr::select(GENOTYPING_ID, age, Sex, StudyArm) %>%
+  drop_na(GENOTYPING_ID)
+
+#Recode vars to numeric
+covar$age <- round(covar$age,digits =1)
+covar$Sex <- ifelse(covar$Sex == "Male", 1, ifelse(covar$Sex == "Female", 2, NA))
+levels(covar$StudyArm)
+covar$StudyArm <- ifelse(covar$StudyArm == "T1",0,
+                         ifelse(covar$StudyArm == "Ty21a",1,
+                                ifelse(covar$StudyArm == "M01ZH09", 2,
+                                       ifelse(covar$StudyArm == "Placebo", 3, NA))))
+
+#Transpose covar table
+m_covar <- as.data.frame(t(covar)) 
+names(m_covar)<- m_covar[1,] %>% as.vector(mode = "character") #subset first row to get names
+m_covar <- m_covar[-c(1),]
+m_covar <- m_covar %>% rownames_to_column(var = "id")
+
+
+# 7 Filter and order genotyping data for T1T2 participants ####
+geno <- fread("~/GWAS_22/Fc_receptor/data/fcr.sample")
+
+#Check samples
+test <- unique(Fc_interest$GENOTYPING_ID) #89 unique names
+test <- unique(names(geno))#349
+
+#Filter genotyping data for these samples ##
+geno <- rename(geno, id = SNP)
+names.use <- names(geno)[names(geno) %in% names(m_exprs)]
+#Order genotyping samples by exprs data
+m_geno <- geno[, ..names.use]
+#m_geno has 89 vars, other tables have 90, therefore 1 extra sample, need to filter
+
+#missing one sample in geno data that's in exprs data
+'%!in%' <- function(x,y)!('%in%'(x,y))
+names.miss<- names(m_exprs)[names(m_exprs) %!in% names(m_geno)]
+names.miss #780 is extra in m_geno #791 is extra in m_exprs
+names.miss<- names(m_covar)[names(m_covar) %!in% names(m_geno)]
+#filter m_exprs
+m_exprs <- select(m_exprs, -`791`)
+m_covar <- select(m_covar, -`791`)
+
+#Order m_geno by m_exprs table
+names.use <- names(m_exprs)
+m_geno <- m_geno[, ..names.use]
+
+# 8 Write mEQTL tables ####
+
+#Save baseline data 
+write.table(m_exprs, "Fc_exprsD0.txt",row.names = F, col.names = T, quote = F, sep = " ")
+write.table(m_geno, "Fc_genoD0.txt",row.names = F, col.names = T, quote = F, sep = " ")
+write.table(m_covar, "Fc_covarD0.txt",row.names = F, col.names = T, quote = F, sep = " ")
+
+```
+#### Get Gene and SNP location data 
+
+- Use ensembl biomart to access SNP and gene loci that will be used to calculate distances from SNPs to genes
+- These distances will allow mEQTL to determine if a SNP is cis or trans-acting
+
+```{r Gene and SNP locations}
+# 9) Gene locations ####
+ensembl = useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+genes <- getBM(attributes=c('hgnc_symbol','chromosome_name','start_position','end_position'),mart = ensembl)
+
+genes <- genes %>% rename(id = hgnc_symbol)
+filtered_genes <- left_join(m_exprs, genes, by = "id") #Maybe redo to select by %in%
+filtered_genes <-filtered_genes[15:20,] #Remove duplicate FCAR genes
+m_gene <- filtered_genes %>% dplyr::select(id, chromosome_name, start_position, end_position)
+
+# 10) SNP locations ####
+
+#Format: snp	chr	pos
+m_snp <- str_split_fixed(m_geno$id, ":",3)
+m_snp <- as.data.frame(m_snp)
+names(m_snp)
+names(m_snp) <- c("chr","pos","Al")
+
+m_snp <- cbind(m_geno$id, m_snp)
+names(m_snp) <- c("snp","chr","pos","Al")
+m_snp <- m_snp[,-4]
+
+# 11) Write Location tables ####
+write.table(filtered_genes, "gene_loc.txt",row.names = F, col.names = T, quote = F, sep = " ")
+write.table(m_snp, "snp_loc.txt", row.names = F, col.names = T, quote = F, sep = " ")
+```
+
+Data is now prepped to input into matrix-eQTL script 
