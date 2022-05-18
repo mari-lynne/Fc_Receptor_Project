@@ -316,6 +316,46 @@ save.image(file = "vast_rnaseq.RData")
 #Possibly fliter more lowly expressed genes
 
 #Volcano Plot ####
+library(ggplot2)
+ggplot(data=results, aes(x=logFC, y=-log10(adj.P.Val))) + geom_point() + theme_minimal()
+
+#TD vs Day0 (all vaccines mixed in)
+#Rename deg results
+deg <- results
+
+#Genes of interest to highlight
+gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCRLA","FCRLB","FCGR2A", "FCGR2B", "FCGR2C")
+
+
+#Make data table with absolute FC values of genes of interest, in this case FCR genes https://www.geeksforgeeks.org/calculate-the-absolute-value-in-r-programming-abs-method/
+data= subset(deg, deg$gene_name %in% gene_list)
+#grep labels on row.names
+deg$label<-row.names(deg) 
+
+
+#For main data mutate a new variable, reg, if FC and P values are above/below a certain threshold
+deg <- deg %>%
+  mutate(reg = case_when(
+    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "UP",
+    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "DOWN",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "no_change",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "no_change",
+    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "no_change"
+  )) %>%
+  mutate(reg = factor(reg, levels = c("UP", "no_change","DOWN")))
+
+
+
+#Plot volcano plot 
+deg %>% ggplot(data=results(aes(x=logFC,y=-log10(P.Value))+ geom_point(aes(color=reg))
+                                                                      
+#Volcano Plot ####
+ ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val),label=gene_name)) + geom_point(aes(color=adj.P.Val))+ scale_color_gradientn(colours = c("#a5342d","darkred", "orange", "yellow"), values=c(0,0.011,1)) + theme_minimal()+geom_label_repel(data= data,size=4,direction="y",nudge_y =4,nudge_x =-0.15,angle= 60,vjust= 0,segment.size= 0.5,segment.color="black",fill="grey") + labs(title = "Baseline - Day of Diagnosis")
+#a5342d #b5651d
+
+library(ggrepel)
+
+
 
 
 #Voom linear time ####
