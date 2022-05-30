@@ -324,7 +324,7 @@ ggplot(data=results, aes(x=logFC, y=-log10(adj.P.Val))) + geom_point() + theme_m
 deg <- results
 
 #Genes of interest to highlight
-gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCRLA","FCRLB","FCGR2A", "FCGR2B", "FCGR2C")
+gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCRLA","FCRLB","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
 
 
 #Make data table with absolute FC values of genes of interest, in this case FCR genes https://www.geeksforgeeks.org/calculate-the-absolute-value-in-r-programming-abs-method/
