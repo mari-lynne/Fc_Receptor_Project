@@ -20,6 +20,7 @@ setwd("~/RNA/Daniel")
 #Load packages and data ####
 library(dplyr)
 library(data.table)
+library(ggplot2)
 library(tidyr)
 library(tidylog)
 library(limma)
@@ -31,6 +32,7 @@ library(edgeR)
 library(BiocManager)
 library(DESeq2)
 library(Glimma)
+library(ggrepel)
 
 load(file = "vast_rnaseq.RData")
 
@@ -82,7 +84,7 @@ cm <- makeContrasts(V7-V1, levels = colnames(design))#TD-D0, #25/08 - D0-V1, V7-
 #Estimate gene expression values ####
 efit <- eBayes(contrasts.fit(lmFit(v,design,block=x$meta_data$participant_id_x,correlation=corfit$consensus), cm))
 
-plotSA(efit)
+plotSA(efit) #Norm looks good
 
 #Save all results
 V7_V1 <- topTable((efit),num = Inf)
@@ -90,8 +92,55 @@ V7_V1 <- topTable((efit),num = Inf)
 
 
 #Neut genes ####
-
+#BAFF (TNFSF13B), APRIL (TNFSF13), IL-21, IL-17, FcR
+#Investigate time course expression if possible 
 #Volcano plots and also splines modelling as per FcRs
 
-#BAFF, APRIL, IL-21, IL-17, FcR
-#Investigate time course expression if possible 
+#Volcano Plot Set up ####
+
+deg = V7_V1 #name of table
+
+p <- ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val))) + geom_point() + theme_minimal()
+p #Note! skewed volcano were seen before by Daniel
+
+#make genes all lowercase
+deg$gene_name <- str_to_lower(deg$gene_name)
+
+#Genes of interest to highlight
+gene_list <- c("fcgr3a","fcar","fcgr1b","fcgr2a","il21ra","tnfsf13", "tnfsf13b","il17ra")
+
+
+#Make data table with absolute FC values of genes of interest, in this case FCR genes https://www.geeksforgeeks.org/calculate-the-absolute-value-in-r-programming-abs-method/
+
+
+#For main data mutate a new variable, reg, if FC and P values are above/below a certain threshold
+deg <- deg %>%
+  mutate(reg = case_when(
+    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "UP",
+    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "DOWN",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "no_change",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "no_change",
+    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "no_change"
+  )) %>%
+  mutate(reg = factor(reg, levels = c("UP", "no_change","DOWN")))
+
+#Plot volcano plot 
+deg %>% ggplot(aes(x=logFC,y=-log10(P.Value), color = reg)) + geom_point()
+
+#Set up labels 
+label <- deg[(deg$gene_name %in% gene_list),]
+
+#Plot Volcano ####
+deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
+  geom_point(aes(color=adj.P.Val))+
+  scale_color_gradientn(colours = c("#a5342d","darkred", "orange", "yellow"),values=c(0,0.011,1))+
+  theme_minimal()+
+    geom_label_repel(data=label,size=4,direction="y",nudge_y =4,nudge_x =-0.15,angle= 60,vjust= 0,segment.size= 0.5,segment.color="black",fill="grey")+
+  labs(title = "7-days Post-Vaccination")
+
+??geom_label_repel
+
+
+
+
+               
