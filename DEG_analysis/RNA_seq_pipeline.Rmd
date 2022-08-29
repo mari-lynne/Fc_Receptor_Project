@@ -1,0 +1,34 @@
+---
+title: "RNA_Seq_Pipeline"
+author: "Mari Johnson"
+date: '2022-08-29'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Source Materials:
+- https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html
+- https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
+- https://www.youtube.com/watch?v=z36fu178jIQ&ab_channel=LiquidBrainBioinformatics
+
+#Overview of chapters:
+
+1) Pre-processing
+- Read and structure count data
+- Remove lowley expressed genes
+- Transform and normalise data
+
+2) Differental gene expression analysis
+- Create design matrix
+- Fit linear model for comparisons of interest
+- Examine differentially expressed genes
+- Visualise comparisons with volcano plots
+
+3) Spline gene modelling 
+- Re-organise normalised RNAseq data from voom object
+- Fit splines model to gene expression values over time course
+- Visualise changes in gene expression using fitted splines/box plots
+- Test for statistical significance
+
