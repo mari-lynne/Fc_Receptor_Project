@@ -34,7 +34,8 @@ library(DESeq2)
 library(Glimma)
 library(ggrepel)
 
-load(file = "vast_rnaseq.RData")
+#load(file = "vast_rnaseq.RData")
+load(file = "VAST_deg.RData")
 
 #Check data ####
 
@@ -72,14 +73,14 @@ colnames(design)<-gsub("time_point3","",colnames(design))
 #Non-valid names: D0+12h
 colnames(design) <- gsub("\\+", "plus", colnames(design))
 
-#Calculate blocking factor for model ####
+#Calculate blocking factor for model and fit ##
 corfit <- duplicateCorrelation(v, design=design, block=x$meta_data$participant_id_x)
 corfit$consensus #0.33
+
 fit <- lmFit(v, design, block=x$meta_data$participant_id_x, correlation =corfit$consensus)
 
-#Contrast matrix ####
-cm <- makeContrasts(V7-V1, levels = colnames(design))#TD-D0, #25/08 - D0-V1, V7-V1
-
+#Contrast matrix start ##############
+cm <- makeContrasts(D0-V0, levels = colnames(design))#TD-D0, #25/08 - D0-V1, V7-V0
 
 #Estimate gene expression values ####
 efit <- eBayes(contrasts.fit(lmFit(v,design,block=x$meta_data$participant_id_x,correlation=corfit$consensus), cm))
@@ -87,7 +88,7 @@ efit <- eBayes(contrasts.fit(lmFit(v,design,block=x$meta_data$participant_id_x,c
 plotSA(efit) #Norm looks good
 
 #Save all results
-V7_V1 <- topTable((efit),num = Inf)
+D0_V0 <- topTable((efit),num = Inf) #V1_V0
 #Check to see that the variance trend has been removed
 
 
@@ -98,7 +99,7 @@ V7_V1 <- topTable((efit),num = Inf)
 
 #Volcano Plot Set up ####
 
-deg = V7_V1 #name of table
+deg = D0_V0 #name of table
 
 p <- ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val))) + geom_point() + theme_minimal()
 p #Note! skewed volcano were seen before by Daniel
@@ -106,41 +107,100 @@ p #Note! skewed volcano were seen before by Daniel
 #make genes all lowercase
 deg$gene_name <- str_to_lower(deg$gene_name)
 
-#Genes of interest to highlight
-gene_list <- c("fcgr3a","fcar","fcgr1b","fcgr2a","il21ra","tnfsf13", "tnfsf13b","il17ra")
+#mutate BAFF and APRIL
+deg$gene_name <- str_replace(deg$gene_name, "tnfsf13b", "baff")
+deg$gene_name <- str_replace(deg$gene_name, "tnfsf13", "april")
 
+#Genes of interest to highlight
+gene_list <- c("fcgr3a","fcar","fcgr1a","fcgr1b","fcgr2a","fcgr2b","fcgr2c","april", "baff")
 
 #Make data table with absolute FC values of genes of interest, in this case FCR genes https://www.geeksforgeeks.org/calculate-the-absolute-value-in-r-programming-abs-method/
-
-
 #For main data mutate a new variable, reg, if FC and P values are above/below a certain threshold
+
 deg <- deg %>%
-  mutate(reg = case_when(
-    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "UP",
-    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "DOWN",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "no_change",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "no_change",
-    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "no_change"
-  )) %>%
-  mutate(reg = factor(reg, levels = c("UP", "no_change","DOWN")))
+  mutate(reg =
+           case_when(
+    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC >= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    deg$logFC <= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "No Change",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "No Change",
+    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "No Change")) %>%
+  mutate(reg =
+           factor(reg, levels =
+                    c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
 
-#Plot volcano plot 
-deg %>% ggplot(aes(x=logFC,y=-log10(P.Value), color = reg)) + geom_point()
-
-#Set up labels 
 label <- deg[(deg$gene_name %in% gene_list),]
 
-#Plot Volcano ####
+#Plot volcano plot
 deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
-  geom_point(aes(color=adj.P.Val))+
-  scale_color_gradientn(colours = c("#a5342d","darkred", "orange", "yellow"),values=c(0,0.011,1))+
-  theme_minimal()+
-    geom_label_repel(data=label,size=4,direction="y",nudge_y =4,nudge_x =-0.15,angle= 60,vjust= 0,segment.size= 0.5,segment.color="black",fill="grey")+
-  labs(title = "7-days Post-Vaccination")
-
-??geom_label_repel
-
-
+  geom_point(aes(color = P.Value))+
+  labs(title = "28-days Post-Vaccination") +
+  theme_minimal() +theme(legend.position = "none") +
+  geom_hline(yintercept = 1.4, linetype = 2.5, alpha =0.7) +
+  geom_hline(yintercept =2.72, linetype = 2.5, alpha =0.7)+
+  geom_label_repel(data=label,size=4,direction="both",nudge_y =1.8,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="lightgrey")+
+  scale_color_gradientn(colours = c("yellow","orange","#ef5a3a","#800000","darkred"),values=c(0,0.0019,0.05,1))
 
 
-               
+#0 - 0.05 = p-val ns, #work out adj p-value reg-pval sig
+#test <- deg %>% filter(adj.P.Val < 0.05) #P =0.0019
+#data=label,size=4,direction="both",nudge_y =1.8,nudge_x =0.08,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="lightgrey"
+  
+degD0V0 <- deg
+
+
+save.image(file = "VAST_deg.RData")
+
+
+#Spline regression modelling ####
+
+#Notes####
+#Fits model to raw expression values
+#but ideally should use estimated expression values from model
+#Start with baseline expression values (no modelling)
+#Then average exprs values from contrast matrix results tables (also keep logFC)
+
+#V0, V1-V0, V7-V0, D0-V0, Post-challenge time points :)
+#Do seperately for TD and nTD participants
+#Vi-TCV participants v Vi-PS participants
+
+#Make new data table with these values for genes of interest
+#Then plot splines based on average expression values 
+
+#Or can I add covars into splines model as long as I keep them in the ggpot DF
+#read up on geom_smooth
+
+
+
+exprs <- v$E
+gene <- v$genes
+target <- v$targets
+designV <- v$design
+
+#514 participants
+
+#update colnames by using meta
+IDs <- meta$lab_id
+Time <- meta$time_point3
+test <- paste(IDs,Time,sep = "_") #can use gsub to clean
+colnames(exprs) <- test
+
+#could subset data for genes of interest
+#rownames of exprs are genes, colnames are participants
+#Remake row names as gene names 
+
+test <- cbind(gene,exprs)
+
+
+
+
+
+
+Fc_exprs %>% ggplot(aes(x=time, y=fcgr2a, colour = diagnosis)) +
+  geom_point() + 
+  xlim(0, 14) + ylim(10,13.3) +
+  scale_colour_manual(values=c("seagreen3", "sandybrown")) +
+  geom_smooth( method = "lm",  aes(group = diagnosis, colour = diagnosis), formula = y ~ splines::ns(x, df = 3)) +
+  xlab("Time (days)") + ylab(expression(paste("Fc",gamma,"R2",alpha, " Expression")))

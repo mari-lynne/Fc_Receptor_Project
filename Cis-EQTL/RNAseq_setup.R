@@ -243,7 +243,7 @@ title(main= "D) MDS - Time Points")
 #Therefore voom normalises - flattens this trend
 #Variances are calculated by fitting a linear model to the data provided by the design matrix
 
-par(mfrow=c(1,2))
+par(mfrow=c(1,1))
 v <- voom(x, plot=TRUE)
 #Error in voom(x, plot = TRUE) : Negative counts not allowed
 #Batch correction results in negative numbers 
