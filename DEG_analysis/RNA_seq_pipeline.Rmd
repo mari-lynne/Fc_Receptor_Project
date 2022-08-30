@@ -81,24 +81,11 @@ names(data$meta_data)[names(data$meta_data) == "days_since_challenge"] <- "time"
 rownames(exprs) <- make_clean_names(rownames(exprs))
 #Remove NA participant IDs (these are in y - transfer over)
 #colnames(data$meta_data)<-gsub("_x","",colnames(data$meta_data))
-colnames(pData) <- stri_replace_all_regex(colnames(data$meta_data),
+colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
                                   pattern=c('_x', 'x_',
                                             '_e2_c3', 'e3_c3', 'e5_c5'),
                                   replacement=c(''),
                                   vectorize=FALSE)
-
-
-#Also need to subset expression data etc to be the same dim
-#Filter remaining dataframes to keep equal matrix dimensions
-#data$counts <- data$counts[,colnames(data$counts) %in% data$meta_data$row_names] 
-#data$samples <- data$samples[rownames(data$samples) %in% data$meta_data$row_names,]
-
-#length(data$samples$norm.factors)
-
-#pData <- data$meta_data
-#samp <- data$samples
-#exprs <- data$counts
-#symbol <- data$gene
 
 ```
 
