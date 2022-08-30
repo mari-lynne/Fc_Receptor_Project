@@ -1,5 +1,5 @@
 ---
-title: "RNA_Seq_Pipeline"
+title: "RNASeq Pipeline"
 author: "Mari Johnson"
 date: '2022-08-29'
 output: html_document
@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE, error = TRUE)
 knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd for Rmd
 ```
-### Aims;
+### Aims:
 
 1) To pre-process RNAseq data for typhoid challenge/vaccination studies
 2) To run differential gene expression analysis at a global and gene level scale
@@ -44,9 +44,10 @@ Source Materials:
 
 ## 1) Pre-processing
 
-```{r Set Directories}
-setwd("~/RNA/Daniel") #where data is saved
+### Set up and tidy data
 
+```{r Set Directories, include = FALSE}
+setwd("~/RNA/Daniel") #where data is saved
 plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/pre-process/") #where to save output plots
 
 #load packages #
@@ -66,29 +67,17 @@ library(Glimma)
 library(RColorBrewer)
 ```
 
-### Set up and tidy data
-
 ```{r Set up Data}
 load("Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
-
 data <- VAST_autosomes #RNAseq data set
 rm(VAST_autosomes)
-
-samp <- data$samples
-exprs <- data$counts
-symbol <- data$gene
-pData <- data$meta_data
 ```
-
-```{r Tidy Data, results='hide'}
-
+```{r Tidy Data, include = FALSE}
 #Clean names using janitor package
 str(data$meta_data)
 data$meta_data <- clean_names(data$meta_data)
-#Rename variables'
+#Rename variables
 names(data$meta_data)[names(data$meta_data) == "days_since_challenge"] <- "time"
-#Clean duplicate gene names (these cause trouble later if not!)
-rownames(exprs) <- make_clean_names(rownames(exprs))
 #Remove NA participant IDs (these are in y - transfer over)
 #colnames(data$meta_data)<-gsub("_x","",colnames(data$meta_data))
 colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
@@ -96,45 +85,39 @@ colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
                                             '_e2_c3', 'e3_c3', 'e5_c5'),
                                   replacement=c(''),
                                   vectorize=FALSE)
-
 ```
 ### Filter and normalise genes
 
 Low expressed genes will be unreliable/not worth testing so remove these low count genes
 Additionally need to normalise data to account for library size/gene counts
 
+*Calcualte log counts/per million*
 ```{r Calculate log counts/per million}
 #Convert counts to log to minimise the effect of small values and negatives
 cpm <- cpm(data)
 lcpm <- cpm(data, log=TRUE) #Used for exploratory plots/checks
-
 L <- mean(data$samples$lib.size) * 1e-6 #average library size
 M <- median(data$samples$lib.size) * 1e-6
 c(L, M)# tells us the median/mean log2 counts per million (11.8)
-
 ```
-```{r Remove Lowly expressed genes}
+*Remove Lowly expressed genes*
+```{r Remove Lowly expressed genes, warning=FALSE}
 #Remove genes with no counts
 table(rowSums(data$counts==0)==521)
-#Samples with row sum = 0 across all samples,
-#13609 samples
-
 #Filter low values using edgeR algorithm
 keep.exprs <- filterByExpr(data)
 # Warning - all samples appear to belong to the same group
 data2 <- data[keep.exprs, keep.lib.sizes=FALSE] #subset og data
-dim(data2)
-#Now there are 12969 genes across 514 participants
+dim(data2) #12969 genes across 521 participants
 ```
-
+*Visualise the frequency of counts across study before and after filtering*
 ```{r Visualise raw and filtered count data, warning=FALSE}
-#Visualise the frequency of counts across study before and after filtering
 lcpm.cutoff <- log2(10/M + 2/L)
 nsamples <- ncol(data) #521/514
 col <- brewer.pal(nsamples, "Paired")
-par(mfrow=c(1,2))
 
 #Plot Raw Log-cpm against density
+par(mfrow=c(1,2))
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
 title(main="A. Raw data", xlab="Log-cpm")
 abline(v=lcpm.cutoff, lty=3)
@@ -142,8 +125,7 @@ for (i in 2:nsamples){
   den <- density(lcpm[,i])
   lines(den$x, den$y, col=col[i], lwd=2)
 }
-
-#Plot filtered version
+#Plot filtered count data
 lcpm <- cpm(data2, log=TRUE)
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
 title(main="B. Filtered data", xlab="Log-cpm")
@@ -152,26 +134,24 @@ for (i in 2:nsamples){
   den <- density(lcpm[,i])
   lines(den$x, den$y, col=col[i], lwd=2)
 }
-#Also can plot as boxplots (see RNAseq_setup.R)
-#Keep filtered data as main DF
+#Save filtered data as main DF
 data <- data2
 rm(data2)
 ```
-### MDS plot 
+### MDS plots 
 
 - Visually examine the factors to include in you linear modelling
 - These could include technical factors such as sequencing lane/batch and also experimental factors such as time points/diagnosis
 - Ideally you would want to see differences in time points where we expect to see DEG's, and less variation between technical factors
 - If there is no clustering then that factor is not necessary for the lm
-- You can also test for two factors together using interaction terms, e.g
- group = interaction(data$meta_data$sequence_pool,data$meta_data$TimePoint)
+- You can also test for two factors together using interaction terms, e.g\
+  `group = interaction(data$meta_data$sequence_pool,data$meta_data$TimePoint)`
 
 ```{r MDS plot}
 #Calc norm factors before MDS plot
 
 #Normalise data ###
 data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scale
-#?calcNormFactors
 #Sequencing lane check
 group = as.factor(data$meta_data$sequence_pool)
 #Set up group to plot/colours
@@ -185,22 +165,15 @@ pdf(paste(plot_dir,"sequence_pool.pdf",sep =""))
 plotMDS(lcpm,labels=group,col=col.group)
 title(main= "Sequencing Pool")
 dev.off()
-
-#VAST notes: 
-#Quite a strong batch effect
-#Will need to account for this technical variation as a covar in any models
-
 ```
 #### Batch correction Notes:
 
-From MDS plot we can see a significant batch effect in sequencing pool
-You can account for batch corrections using limma (this might be useful for raw data in splines model later) e.g limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)
-Remove batch effect from raw counts and then reconvert to lcpm to get rid of negative value, which disturb the model. Re-normalise batch corrected values?
-
-But for DEG analysis just include sequencing_pool as a co-variate in the model
+From the MDS plot we can see a significant batch effect in sequencing pool\
+You can account for batch corrections using limma (this might be useful for raw data in splines\ model later) e.g `limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)`\
+Remove batch effect from raw counts and then reconvert to lcpm to get rid of negative value, which disturb the model. Re-normalise batch corrected values?\
+But for DEG analysis just include sequencing_pool as a co-variate in the model\
 
 ```{r Time point MDS, message=FALSE}
-
 #Time point MDS
 group = as.factor(data$meta_data$time_point3)
 col.group<-group
@@ -214,7 +187,6 @@ pdf(paste(plot_dir,"time_mds.pdf",sep =""))
 plotMDS(lcpm,labels=group,col=col.group)
 title(main= "Time Point") #Some clustering around TD already :)
 dev.off()
-
 ```
 ```{r Vaccine MDS, message=FALSE}
 #Time point MDS
@@ -232,8 +204,7 @@ title(main= "Vaccination status") #Some clustering around TD already :)
 dev.off()
 ```
 
-
-## 2) Differential gene expression analysis
+### 2) Differential gene expression analysis
 
 #### Design Matrix
 
@@ -244,12 +215,9 @@ Now at the start of your analysis, you might have an idea of some comparisons yo
 We want to model the average difference (fold change) in gene expression between these two groups.
 E.g `lm(exprs_data ~ vaccine_group)`
 
-However, if one group had for example an older average participant age, or a technical batch differences that would skew the results, we want to include these factors as covariates in our model as such:
+However, if one group had for example an older average participant age, or a technical batch differences that would skew the results, we want to include these factors as covariates in our model as such: `lm(exprs_data ~ vaccine_group + age + sex)`
 
-`lm(exprs_data ~ vaccine_group + age + sex)`
-
-
-The *design matrix* runs across all our samples, and notes down the corresponding model parameters extracted from the orginal S4 data$metadata, i.e vaccine group, age, sequence_pool
+The *design matrix* runs across all our samples, and notes down the corresponding model parameters extracted from the orginal S4 data$metadata, i.e vaccine group, age, sequence_pool\
 It is set up so that rows are associated with samples and columns are associated with the specified model parameters.
 
 ```{r, echo=FALSE}
@@ -259,18 +227,32 @@ url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1e
 ```
 <center><img src="`r url`"></center>
 
+*Design matrix data prep*
+
+1) Check metadata variable names/data types for design `clean_names()`
+      - Design matrix can't have duplicate column names, weird symbols etc
+      - Check numeric vars are recoded to factors if necessary
+2) Check for NA values
+      - Samples with Na values (in vars specified by design) are automatically removed from matrix
+      - Causes trouble downstream as design/sample/contrast matrix will have uneven dims
+      - Check for na's using `is.na` loop, poss recode to a dummy value if we need to keep them (they can be filtered out by the contrast selection later, so it's more of a code issue at this point)
+3) Remove null variables
+      - Vars with all 0s or NAs add nothing to the model so can be removed
 
 ```{r Design Matrix, results='hide'}
-#Check metadata variable names/data types for design 
-#Design matrix can't have duplicate column names, weird symbols etc
 pData <- data$meta_data
 str(pData)
-
 #Change sequence pool to factor
 data$meta_data$sequence_pool <- as.factor(data$meta_data$sequence_pool)
 
+#Check for Nas
+sapply(data$meta_data, function(x) sum(is.na(x)))
+test <- data$meta_data[sapply(data$meta_data, function(x) sum(is.na(x))),]
+View(test) #these are missing time_point3 part_ID_x but have data for the design categories
+#so confused why they're still being removed
+#Desin splits time point into factors and they don't have said factors? or could be ID issue
 #Model design matrix
-design <- model.matrix(~0 + time_point3 + diagnosis + age_at_do + sex + vaccine + sequence_pool,data = data$meta_data)
+design <- model.matrix(~time_point3 + diagnosis + age_at_do + sex + vaccine + sequence_pool, data = data$meta_data) #514 samples NA issue check
 
 #Remove null variables, i.e = all 0s or NAs
 design <- design[,-(colSums(design) == 0)]
@@ -281,6 +263,14 @@ colnames(design)<-gsub("vaccine","",colnames(design))
 colnames(design)<-gsub("time_point3","",colnames(design))
 
 ```
+*Intercept terms*
+For a single explanatory variable a design matrix can be coded by `model.matrix(~variable)` to include an intercept term, or by model.matrix(~0+variable) to exclude the intercept term.\
+If our variable is categorical, then design models with and without the intercept term are equivalent, but if variable is a numerical covariate, then the choice of model type matters
+
+- If we have any numeric (non-catgorical) variables in our model, it is best to include a y intercept, as the model of gene expression may not start from zero
+- If we just have categorical variables, e.g we are comparing gene expression between two treatment groups then we don't need to include the intercept and it can be excluded by `model.matrix(~0+ variable)`
+
+
 
 
 ### Limma Voom
