@@ -67,12 +67,11 @@ library(Glimma)
 library(RColorBrewer)
 ```
 
-```{r Set up Data}
+```{r Set up Data, include = FALSE}
 load("Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
 data <- VAST_autosomes #RNAseq data set
-rm(VAST_autosomes)
-```
-```{r Tidy Data, include = FALSE}
+#rm(VAST_autosomes)
+
 #Clean names using janitor package
 str(data$meta_data)
 data$meta_data <- clean_names(data$meta_data)
@@ -85,6 +84,23 @@ colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
                                             '_e2_c3', 'e3_c3', 'e5_c5'),
                                   replacement=c(''),
                                   vectorize=FALSE)
+
+#Remove control samples - as these have diff time points, causes a later issue with time and vaccine being linearly dependent, analyse seperately for now
+table(data$meta_data$study_arm)
+samples <- data$samples[(data$meta_data$study_arm != "CTRL"),]
+meta_data <- data$meta_data[(data$meta_data$study_arm != "CTRL"),]
+samples <- cbind(samples,meta_data)
+data$gene[(data$meta_data$study_arm != "CTRL"),]
+genes <- data$genes[(data$meta_data$study_arm != "CTRL"),]
+#filter col names in row names of metadata #row, col
+counts <- data$counts[rownames(data$counts) %in% rownames(genes),
+                      colnames(data$counts) %in% meta_data$row_names]
+#filter rows (genes in counts, by the colnames (genes) in genes)
+#reform s3 DGElist object
+data <- DGEList(counts=counts,
+                genes = genes,
+                samples = samples)
+
 ```
 ### Filter and normalise genes
 
@@ -98,12 +114,12 @@ cpm <- cpm(data)
 lcpm <- cpm(data, log=TRUE) #Used for exploratory plots/checks
 L <- mean(data$samples$lib.size) * 1e-6 #average library size
 M <- median(data$samples$lib.size) * 1e-6
-c(L, M)# tells us the median/mean log2 counts per million (11.8)
+c(L, M)
 ```
 *Remove Lowly expressed genes*
 ```{r Remove Lowly expressed genes, warning=FALSE}
 #Remove genes with no counts
-table(rowSums(data$counts==0)==521)
+table(rowSums(data$counts==0)==427)
 #Filter low values using edgeR algorithm
 keep.exprs <- filterByExpr(data)
 # Warning - all samples appear to belong to the same group
@@ -117,6 +133,7 @@ nsamples <- ncol(data) #521/514
 col <- brewer.pal(nsamples, "Paired")
 
 #Plot Raw Log-cpm against density
+pdf(paste(plot_dir,"filter.pdf",sep =""))
 par(mfrow=c(1,2))
 plot(density(lcpm[,1]), col=col[1], lwd=2, ylim=c(0,0.26), las=2, main="", xlab="")
 title(main="A. Raw data", xlab="Log-cpm")
@@ -134,9 +151,14 @@ for (i in 2:nsamples){
   den <- density(lcpm[,i])
   lines(den$x, den$y, col=col[i], lwd=2)
 }
+
 #Save filtered data as main DF
 data <- data2
 rm(data2)
+
+#Calc norm factors
+#Normalise data ###
+data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scale
 ```
 ### MDS plots 
 
@@ -148,10 +170,6 @@ rm(data2)
   `group = interaction(data$meta_data$sequence_pool,data$meta_data$TimePoint)`
 
 ```{r MDS plot}
-#Calc norm factors before MDS plot
-
-#Normalise data ###
-data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scale
 #Sequencing lane check
 group = as.factor(data$meta_data$sequence_pool)
 #Set up group to plot/colours
@@ -160,8 +178,8 @@ col.group <-group
 levels(col.group) <-brewer.pal(nlevels(col.group),"Accent")
 col.group<-as.character(col.group)
 
-#Plot MDS (Post-norm)
-pdf(paste(plot_dir,"sequence_pool.pdf",sep =""))
+#Plot MDS 
+#pdf(paste(plot_dir,"sequence_pool2.pdf",sep =""))
 plotMDS(lcpm,labels=group,col=col.group)
 title(main= "Sequencing Pool")
 dev.off()
@@ -236,7 +254,9 @@ url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1e
       - Samples with Na values (in vars specified by design) are automatically removed from matrix
       - Causes trouble downstream as design/sample/contrast matrix will have uneven dims
       - Check for na's using `is.na` loop, poss recode to a dummy value if we need to keep them (they can be filtered out by the contrast selection later, so it's more of a code issue at this point)
-3) Remove null variables
+3) Check for linear dependencies/rank
+      - If some model parameters are dependent on another then these will mess up the linear model
+4) Remove null variables
       - Vars with all 0s or NAs add nothing to the model so can be removed
 
 ```{r Design Matrix, results='hide'}
@@ -248,20 +268,36 @@ data$meta_data$sequence_pool <- as.factor(data$meta_data$sequence_pool)
 #Check for Nas
 sapply(data$meta_data, function(x) sum(is.na(x)))
 test <- data$meta_data[sapply(data$meta_data, function(x) sum(is.na(x))),]
-View(test) #these are missing time_point3 part_ID_x but have data for the design categories
-#so confused why they're still being removed
-#Desin splits time point into factors and they don't have said factors? or could be ID issue
+View(test) #samples have data for the design categories, however are missing levels of time factor which results in them being ommited from model.matrix - it was the vaccine rip
+
 #Model design matrix
-design <- model.matrix(~time_point3 + diagnosis + age_at_do + sex + vaccine + sequence_pool, data = data$meta_data) #514 samples NA issue check
+design <- model.matrix(~0+ time_point3 + sex + study_arm + sequence_pool, data = data$meta_data) #514 samples NA issue, can subset exprs data by design rows if we want to use this
+#Leave out diagnosis for now + diagnosis
+
+#Check linear dependencies 
+#My bet is on time_point and study arm, as the control group wont have vacc time points, therefore should nest these factors?
+ncol(design) #17
+qr(design)$rank #16 - unequal rank = linear dependencies
+
+rankifremoved <- sapply(1:ncol(design), function (x) qr(design[,-x])$rank)
+#Column (design factor) if removed, that result in the highest rank are the linearly dependent ones (since removing those does not decrease rank, while removing a linearly independent column does).
+which(rankifremoved == max(rankifremoved)) #1:12 exc col 9 - time/study arm
+
+#Manual nested matrix
+length(unique(data$meta_data$lab_id)) #105
+design2 <- model.matrix(~0+lab_id, data = data$meta_data)
+design2 <- cbind(design2, pData= study_arm =="ViTCV" & timepoint_3 =="V0")
+design <- cbind(design2, Y= treatment=="Y" & timepoint=="T2")
+
+#Just filter control samples for now
+
 
 #Remove null variables, i.e = all 0s or NAs
-design <- design[,-(colSums(design) == 0)]
-#design <- test[,-c(9:10)]
+#design <- design[,-(colSums(design) == 0)]
 
 #Tidy new design colnames
-colnames(design)<-gsub("vaccine","",colnames(design))
+colnames(design)<-gsub("study_arm","",colnames(design))
 colnames(design)<-gsub("time_point3","",colnames(design))
-
 ```
 *Intercept terms*
 For a single explanatory variable a design matrix can be coded by `model.matrix(~variable)` to include an intercept term, or by model.matrix(~0+variable) to exclude the intercept term.\
@@ -270,15 +306,12 @@ If our variable is categorical, then design models with and without the intercep
 - If we have any numeric (non-catgorical) variables in our model, it is best to include a y intercept, as the model of gene expression may not start from zero
 - If we just have categorical variables, e.g we are comparing gene expression between two treatment groups then we don't need to include the intercept and it can be excluded by `model.matrix(~0+ variable)`
 
-
-
-
 ### Limma Voom
 
-Limma uses linear modelling on log-CPM values to model gene expression from RNAseq data, an assumption of the model is that the errors/residuals/variance are normally distributed.
-However, it has been established that for RNAseq data there is a non-linear relationship between the number of counts of a given gene, and the variance of those counts.
-Because the variance is unequal across a range of values, i.e the data is heteroskedastic, we have to normalise this unequal variance.
-The voom function normalises/adjusts variance so it is no longer dependent on count size, and we can model gene expression accurately in future steps.
+Limma uses linear modelling on log-CPM values to model gene expression from RNAseq data, an assumption of the model is that the errors/residuals/variance are normally distributed.\
+However, it has been established that for RNAseq data there is a non-linear relationship between the number of counts of a given gene, and the variance of those counts.\
+Because the variance is unequal across a range of values, i.e the data is heteroskedastic, we have to normalise this unequal variance.\
+The voom function normalises/adjusts variance so it is no longer dependent on count size, and we can model gene expression accurately in future steps.\
 
 As the voom function is normalising the residuals around a fitted model, we need to input the design matrix as described in section 2, which specifies linear model variables, to perform voom accordingly
 
@@ -288,6 +321,11 @@ As the voom function is normalising the residuals around a fitted model, we need
 #Lower counts tend to have lower variance
 #Therefore voom normalises - flattens this trend
 #Variances are calculated by fitting a linear model to the data provided by the design matrix
+
+v <- voom(data,design,plot=TRUE)
+# Warning Coefficients not estimable: ViTCV
+#Warning: Partial NA coefficients for 12969 probe(s)
+
 
 ```
 
