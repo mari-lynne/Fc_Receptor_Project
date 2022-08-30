@@ -6,15 +6,13 @@ output: html_document
 ---
 
 ```{r Rmd setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, error = TRUE)
 knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd for Rmd
 ```
+### Aims;
 
-
-Source Materials:
-- https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html
-- https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
-- https://www.youtube.com/watch?v=z36fu178jIQ&ab_channel=LiquidBrainBioinformatics
+1) To pre-process RNAseq data for typhoid challenge/vaccination studies
+2) To run differential gene expression analysis at a global and gene level scale
 
 ### Overview of chapters
 
@@ -36,10 +34,21 @@ Source Materials:
 - Visualise changes in gene expression using fitted splines/box plots
 - Test for statistical significance
 
+
+Source Materials:
+- https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html
+- https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html
+- https://www.youtube.com/watch?v=z36fu178jIQ&ab_channel=LiquidBrainBioinformatics
+
+
+
 ## 1) Pre-processing
 
-```{r Set wd and load packages}
+```{r Set Directories}
 setwd("~/RNA/Daniel") #where data is saved
+
+plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/pre-process/") #where to save output plots
+
 #load packages #
 library(dplyr)
 library(data.table)
@@ -57,6 +66,7 @@ library(Glimma)
 library(RColorBrewer)
 ```
 
+### Set up and tidy data
 
 ```{r Set up Data}
 load("Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
@@ -70,7 +80,7 @@ symbol <- data$gene
 pData <- data$meta_data
 ```
 
-```{r Tidy Data}
+```{r Tidy Data, results='hide'}
 
 #Clean names using janitor package
 str(data$meta_data)
@@ -88,9 +98,13 @@ colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
                                   vectorize=FALSE)
 
 ```
+### Filter and normalise genes
+
+Low expressed genes will be unreliable/not worth testing so remove these low count genes
+Additionally need to normalise data to account for library size/gene counts
 
 ```{r Calculate log counts/per million}
-#Convert to log to minimise the effect of small values and negatives
+#Convert counts to log to minimise the effect of small values and negatives
 cpm <- cpm(data)
 lcpm <- cpm(data, log=TRUE) #Used for exploratory plots/checks
 
@@ -100,9 +114,9 @@ c(L, M)# tells us the median/mean log2 counts per million (11.8)
 
 ```
 ```{r Remove Lowly expressed genes}
+#Remove genes with no counts
 table(rowSums(data$counts==0)==521)
 #Samples with row sum = 0 across all samples,
-#i.e genes that don't have any counts across samples
 #13609 samples
 
 #Filter low values using edgeR algorithm
@@ -114,7 +128,7 @@ dim(data2)
 ```
 
 ```{r Visualise raw and filtered count data, warning=FALSE}
-
+#Visualise the frequency of counts across study before and after filtering
 lcpm.cutoff <- log2(10/M + 2/L)
 nsamples <- ncol(data) #521/514
 col <- brewer.pal(nsamples, "Paired")
@@ -153,16 +167,11 @@ rm(data2)
  group = interaction(data$meta_data$sequence_pool,data$meta_data$TimePoint)
 
 ```{r MDS plot}
-#Do before and after normalisation/batch correction
-
-#VAST notes: 
-#Quite a strong batch effect
-#Will need to account for this technical variation as a covar in any models
-#Normalisation didn't help MDS plots
+#Calc norm factors before MDS plot
 
 #Normalise data ###
 data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scale
-?calcNormFactors
+#?calcNormFactors
 #Sequencing lane check
 group = as.factor(data$meta_data$sequence_pool)
 #Set up group to plot/colours
@@ -172,28 +181,25 @@ levels(col.group) <-brewer.pal(nlevels(col.group),"Accent")
 col.group<-as.character(col.group)
 
 #Plot MDS (Post-norm)
+pdf(paste(plot_dir,"sequence_pool.pdf",sep =""))
 plotMDS(lcpm,labels=group,col=col.group)
-title(main= "Sequencing Groups (Normalised)")
+title(main= "Sequencing Pool")
+dev.off()
 
-#Batch correction ####
-#Use limma (or combat) to remove sequencing batch effects
-lcpm <- limma::removeBatchEffect(lcpm, data$meta_data$sequence_pool)
+#VAST notes: 
+#Quite a strong batch effect
+#Will need to account for this technical variation as a covar in any models
 
-test <- limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)
+```
+#### Batch correction Notes:
 
-test <- data$counts
-  
-  
-#re-calculate log to remove neg values
-lcpm <- cpm(data2, log=TRUE)
+From MDS plot we can see a significant batch effect in sequencing pool
+You can account for batch corrections using limma (this might be useful for raw data in splines model later) e.g limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)
+Remove batch effect from raw counts and then reconvert to lcpm to get rid of negative value, which disturb the model. Re-normalise batch corrected values?
 
+But for DEG analysis just include sequencing_pool as a co-variate in the model
 
-group = as.factor(data$meta_data$sequence_pool)
-col.group<-group
-levels(col.group)<-brewer.pal(nlevels(col.group),"Accent")
-col.group<-as.character(col.group)
-plotMDS(lcpm,labels=group,col=col.group)
-title(main= "Sequencing Groups - Batch corrected")
+```{r Time point MDS, message=FALSE}
 
 #Time point MDS
 group = as.factor(data$meta_data$time_point3)
@@ -202,13 +208,80 @@ col.group<-group
 palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
 levels(col.group)<-palette_Dark2(length(unique(data$meta_data$time_point3)))
 col.group<-as.character(col.group)
-#Plot
+#Plot MDS
+pdf(paste(plot_dir,"time_mds.pdf",sep =""))
+#starts writing a PDF to file
 plotMDS(lcpm,labels=group,col=col.group)
 title(main= "Time Point") #Some clustering around TD already :)
-
-#Can't save batch corrected values back in as negative and messes up voom
+dev.off()
 
 ```
+```{r Vaccine MDS, message=FALSE}
+#Time point MDS
+group = as.factor(data$meta_data$study_arm)
+col.group<-group
+#Set colours
+palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
+levels(col.group)<-palette_Dark2(length(unique(data$meta_data$time_point3)))
+col.group<-as.character(col.group)
+#Plot MDS
+pdf(paste(plot_dir,"vaccine_mds.pdf", sep =""))
+#starts writing a PDF to file
+plotMDS(lcpm,labels=group,col=col.group)
+title(main= "Vaccination status") #Some clustering around TD already :)
+dev.off()
+```
+
+
+## 2) Differential gene expression analysis
+
+#### Design Matrix
+
+Generally, data preparation for DEG analysis utilises all the samples in your study, even the ones that you might not care about using or comparing initially, and keeps them in a matrix format (this allows R to easily subset conditions, based on matching row or column indices).
+
+Now at the start of your analysis, you might have an idea of some comparisons you would like to make, let's say the difference between vaccinated and non-vaccinated samples. (ignore time points for now)
+
+We want to model the average difference (fold change) in gene expression between these two groups.
+E.g `lm(exprs_data ~ vaccine_group)`
+
+However, if one group had for example an older average participant age, or a technical batch differences that would skew the results, we want to include these factors as covariates in our model as such:
+
+`lm(exprs_data ~ vaccine_group + age + sex)`
+
+
+The *design matrix* runs across all our samples, and notes down the corresponding model parameters extracted from the orginal S4 data$metadata, i.e vaccine group, age, sequence_pool
+It is set up so that rows are associated with samples and columns are associated with the specified model parameters.
+
+```{r, echo=FALSE}
+# Define variable containing url
+url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1ebb-48d6-a35c-007d3d42961c_figure2.gif"
+#html code to place and size below inline text
+```
+<center><img src="`r url`"></center>
+
+
+```{r Design Matrix, results='hide'}
+#Check metadata variable names/data types for design 
+#Design matrix can't have duplicate column names, weird symbols etc
+pData <- data$meta_data
+str(pData)
+
+#Change sequence pool to factor
+data$meta_data$sequence_pool <- as.factor(data$meta_data$sequence_pool)
+
+#Model design matrix
+design <- model.matrix(~0 + time_point3 + diagnosis + age_at_do + sex + vaccine + sequence_pool,data = data$meta_data)
+
+#Remove null variables, i.e = all 0s or NAs
+design <- design[,-(colSums(design) == 0)]
+#design <- test[,-c(9:10)]
+
+#Tidy new design colnames
+colnames(design)<-gsub("vaccine","",colnames(design))
+colnames(design)<-gsub("time_point3","",colnames(design))
+
+```
+
 
 ### Limma Voom
 
@@ -217,6 +290,8 @@ However, it has been established that for RNAseq data there is a non-linear rela
 Because the variance is unequal across a range of values, i.e the data is heteroskedastic, we have to normalise this unequal variance.
 The voom function normalises/adjusts variance so it is no longer dependent on count size, and we can model gene expression accurately in future steps.
 
+As the voom function is normalising the residuals around a fitted model, we need to input the design matrix as described in section 2, which specifies linear model variables, to perform voom accordingly
+
 
 ```{r Voom}
 #Plots mean count size (x) against variance (y)
@@ -224,60 +299,16 @@ The voom function normalises/adjusts variance so it is no longer dependent on co
 #Therefore voom normalises - flattens this trend
 #Variances are calculated by fitting a linear model to the data provided by the design matrix
 
-par(mfrow=c(1,1))
-v <- voom(data, plot=TRUE)
 ```
+
 Typically voom plot shows higher variance for lower counts. If filtering was not performed properly,a drop in variance levels can be observed at the low end of the expression scale due to very small counts. Experiments with high biological variation tend to result in flatter trends, lower biological variation tend to have sharper trends.
 
 When modelling gene expression between conditions using design/contrast matricies, we can now use our corrected data in the voom object (S4), and visually check that we have removed the variance trend with log expression. 
 
-## 2) Differential gene expression analysis
 
-### Matricies
-
-#### Design Matrix
-
-The general set up for DEG analysis is to imagine all the samples in your study, even the ones that you might not care about using or comparing. Now at the start of your analysis, you might have an idea of some comparisons you would like to make, let's say the difference between vaccinated and non-vaccinated samples. (ignoring time points for now)
-
-We want to model the average difference (fold change) in gene expression between these two groups.
-E.g
-lm(exprs_data ~ vaccine_group)
-
-However, if one group for example had an older average participant age, or a difference in sex that would skew the results, therefore we want to include these as covariates in our model
-
-lm(exprs_data ~ vaccine_group + age + sex)
-
-
-The *design matrix* goes across all our samples, and notes down the corresponding model parameters, i.e vaccine group, and also covar information.
-It is set up so that rows are associated with samples and columns are associated with the specified model parameters.
-
-
-```{r Design Matrix}
-
-#Re-tidy colnames
-colnames(data$meta_data) <- make_clean_names(colnames(data$meta_data))
-data$meta_data$sequence_pool <- as.factor(data$meta_data$sequence_pool)
-
-#Model design matrix
-design <- model.matrix(~0 + time_point3 + diagnosis + age_at_do + sex + vaccine_x + sequence_pool,data = v$meta_data)
-
-v$meta_data
-
-View(design)
-#514 samples/rows #also extra diagnosis column made
-#Remove zero columns and extra diagnosis ones
-design <- design[,-(colSums(design) == 0)]
-design <- test[,-c(9:10)]
-#Tidy new colnames
-colnames(design)<-gsub("vaccine","",colnames(design))
-colnames(design)<-gsub("time_point3","",colnames(design))
-
-```
-#### Contrast Matrix
-
+### Contrast Matrix
 
 Our contrast matrix will go through all of our samples and indicate whether a sample is to be compared, and which group it belongs to.
 It sets this up as so that rows are associated with model parameters and colums represent the contrast of interest
-
 
 Our design matrix indicates to the linear model 
