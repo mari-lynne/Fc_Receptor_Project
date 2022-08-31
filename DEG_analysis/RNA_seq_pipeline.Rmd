@@ -73,7 +73,7 @@ data <- VAST_autosomes #RNAseq data set
 #rm(VAST_autosomes)
 
 #Clean names using janitor package
-str(data$meta_data)
+str(data$samples)
 data$meta_data <- clean_names(data$meta_data)
 #Rename variables
 names(data$meta_data)[names(data$meta_data) == "days_since_challenge"] <- "time"
@@ -156,9 +156,9 @@ for (i in 2:nsamples){
 data <- data2
 rm(data2)
 
-#Calc norm factors
 #Normalise data ###
 data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scale
+
 ```
 ### MDS plots 
 
@@ -171,7 +171,7 @@ data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scal
 
 ```{r MDS plot}
 #Sequencing lane check
-group = as.factor(data$meta_data$sequence_pool)
+group = as.factor(data$samples$sequence_pool)
 #Set up group to plot/colours
 lcpm<-cpm(data,log=TRUE)
 col.group <-group
@@ -179,7 +179,7 @@ levels(col.group) <-brewer.pal(nlevels(col.group),"Accent")
 col.group<-as.character(col.group)
 
 #Plot MDS 
-#pdf(paste(plot_dir,"sequence_pool2.pdf",sep =""))
+pdf(paste(plot_dir,"sequence_pool2.pdf",sep =""))
 plotMDS(lcpm,labels=group,col=col.group)
 title(main= "Sequencing Pool")
 dev.off()
@@ -193,11 +193,11 @@ But for DEG analysis just include sequencing_pool as a co-variate in the model\
 
 ```{r Time point MDS, message=FALSE}
 #Time point MDS
-group = as.factor(data$meta_data$time_point3)
+group = as.factor(data$samples$time_point3)
 col.group<-group
 #Set colours
 palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
-levels(col.group)<-palette_Dark2(length(unique(data$meta_data$time_point3)))
+levels(col.group)<-palette_Dark2(length(unique(data$samples$time_point3)))
 col.group<-as.character(col.group)
 #Plot MDS
 pdf(paste(plot_dir,"time_mds.pdf",sep =""))
@@ -208,11 +208,11 @@ dev.off()
 ```
 ```{r Vaccine MDS, message=FALSE}
 #Time point MDS
-group = as.factor(data$meta_data$study_arm)
+group = as.factor(data$samples$study_arm)
 col.group<-group
 #Set colours
 palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
-levels(col.group)<-palette_Dark2(length(unique(data$meta_data$time_point3)))
+levels(col.group)<-palette_Dark2(length(unique(data$samples$time_point3)))
 col.group<-as.character(col.group)
 #Plot MDS
 pdf(paste(plot_dir,"vaccine_mds.pdf", sep =""))
@@ -235,7 +235,9 @@ E.g `lm(exprs_data ~ vaccine_group)`
 
 However, if one group had for example an older average participant age, or a technical batch differences that would skew the results, we want to include these factors as covariates in our model as such: `lm(exprs_data ~ vaccine_group + age + sex)`
 
-The *design matrix* runs across all our samples, and notes down the corresponding model parameters extracted from the orginal S4 data$metadata, i.e vaccine group, age, sequence_pool\
+When deciding on what parameters to include in the model we can test for significant effects by examining the MDS plots, variables that result in clustering/separation of data should therefore be included if we are measuring the overall gene expression.
+
+The *design matrix* contains the model parameters we specify per each sample, and extracts this information from the corresponding metadata, i.e vaccine group, age, sequence_pool\
 It is set up so that rows are associated with samples and columns are associated with the specified model parameters.
 
 ```{r, echo=FALSE}
@@ -260,40 +262,46 @@ url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1e
       - Vars with all 0s or NAs add nothing to the model so can be removed
 
 ```{r Design Matrix, results='hide'}
-pData <- data$meta_data
+pData <- data$samples
 str(pData)
 #Change sequence pool to factor
-data$meta_data$sequence_pool <- as.factor(data$meta_data$sequence_pool)
+data$samples$sequence_pool <- as.factor(data$samples$sequence_pool)
 
 #Check for Nas
-sapply(data$meta_data, function(x) sum(is.na(x)))
-test <- data$meta_data[sapply(data$meta_data, function(x) sum(is.na(x))),]
+test <- data$samples[sapply(data$samples, function(x) sum(is.na(x))),]
 View(test) #samples have data for the design categories, however are missing levels of time factor which results in them being ommited from model.matrix - it was the vaccine rip
 
 #Model design matrix
-design <- model.matrix(~0+ time_point3 + sex + study_arm + sequence_pool, data = data$meta_data) #514 samples NA issue, can subset exprs data by design rows if we want to use this
-#Leave out diagnosis for now + diagnosis
+design <- model.matrix(~0+ time_point3 + study_arm + sex + sequence_pool, data = data$samples)
 
-#Check linear dependencies 
-#My bet is on time_point and study arm, as the control group wont have vacc time points, therefore should nest these factors?
-ncol(design) #17
-qr(design)$rank #16 - unequal rank = linear dependencies
+#Leave out diagnosis for now
+#Vaccine and diagnosis - linearly dependent on time
+#Therefore should make new factor time*vaccine
 
+#Check linear dependencies ####
+#The rank of the matrix is the total number of independent columns/vectors in the matrix.
+#So if our matrix rank is smaller than the number of columns, then there must be linear dependencies, i.e that vector can be made up by either a copy of or multiplying another one of the vectors.
+# A vector of all zeros will also count as a dependent vector, therefore need to remove these (as well as it being redundant for the model anyways)
+
+#Notes: My bet is on time_point and study arm, as the control group wont have vac time points, therefore should nest these factors? Update - removed control group from orignal data and design, also time_point D14 when checking using interaction time*vaccine, only had Vi-PS samples. So if you were to include D14 as a time point in the model you would also just be measuring the effects of Vi-PS, therefore for now when looking at both vaccine groups, excluding D14 from analysis
+
+# 1) Test for linear dependencies
+ncol(design) 
+qr(design)$rank # Unequal ncol-rank = linear dependencies present
+
+# 2) Find linear dependent cols
 rankifremoved <- sapply(1:ncol(design), function (x) qr(design[,-x])$rank)
 #Column (design factor) if removed, that result in the highest rank are the linearly dependent ones (since removing those does not decrease rank, while removing a linearly independent column does).
-which(rankifremoved == max(rankifremoved)) #1:12 exc col 9 - time/study arm
-
-#Manual nested matrix
-length(unique(data$meta_data$lab_id)) #105
-design2 <- model.matrix(~0+lab_id, data = data$meta_data)
-design2 <- cbind(design2, pData= study_arm =="ViTCV" & timepoint_3 =="V0")
-design <- cbind(design2, Y= treatment=="Y" & timepoint=="T2")
-
-#Just filter control samples for now
+which(rankifremoved == max(rankifremoved))
+detect.lindep(design) #or use function from library(plm)
 
 
-#Remove null variables, i.e = all 0s or NAs
-#design <- design[,-(colSums(design) == 0)]
+# 3) Remove Problem variables
+#Remove null variables, i.e = all 0s or NAs (Control)
+#Remove linear dependent vars (D14)
+colSums(design) == 0
+design <- design[,-c(8:9)] 
+#Re-check rank/ncol
 
 #Tidy new design colnames
 colnames(design)<-gsub("study_arm","",colnames(design))
@@ -323,20 +331,17 @@ As the voom function is normalising the residuals around a fitted model, we need
 #Variances are calculated by fitting a linear model to the data provided by the design matrix
 
 v <- voom(data,design,plot=TRUE)
-# Warning Coefficients not estimable: ViTCV
-#Warning: Partial NA coefficients for 12969 probe(s)
-
-
 ```
+Typically Voom plot shows higher variance for lower counts. If filtering was not performed properly,a drop in variance levels can be observed at the low end of the expression scale due to very small counts. Experiments with high biological variation tend to result in flatter trends, lower biological variation tend to have sharper trends.
 
-Typically voom plot shows higher variance for lower counts. If filtering was not performed properly,a drop in variance levels can be observed at the low end of the expression scale due to very small counts. Experiments with high biological variation tend to result in flatter trends, lower biological variation tend to have sharper trends.
-
-When modelling gene expression between conditions using design/contrast matricies, we can now use our corrected data in the voom object (S4), and visually check that we have removed the variance trend with log expression. 
+When modelling gene expression between conditions using design/contrast matricies, we can now use our corrected data in the Voom object (S4), and visually check that we have removed the variance trend with log expression. 
 
 
 ### Contrast Matrix
 
-Our contrast matrix will go through all of our samples and indicate whether a sample is to be compared, and which group it belongs to.
-It sets this up as so that rows are associated with model parameters and colums represent the contrast of interest
+Our contrast matrix will go through all of our samples and indicate whether a sample is to be used compared, and which group it belongs to.\
+The matrix is set up as so that rows are associated with model parameters and columns represent the contrast of interest
 
-Our design matrix indicates to the linear model 
+As both design and contrast matrix relate to sample expression/count data/norm factors stored in DGE matrices, they need to all be the same dimensions.
+
+
