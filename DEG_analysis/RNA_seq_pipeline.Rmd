@@ -224,6 +224,30 @@ dev.off()
 
 ### 2) Differential gene expression analysis
 
+Once our data is pre-processed and normalised, we can compare counts or gene expression between participants and different groups.
+
+If we just wanted to look at normalised counts/gene expression between two participants we could make direct comparisons, with no further modelling required
+
+However if we want to make larger comparisons between groups of interest, i.e time points, or between vaccine groups, just comparing the mean expression of these two groups would be disingenuous, as it would not take into account other factors which influence the overall gene expression of that group.
+
+For example comparing gene expression between Vi-TCV and Vi-PS particiapnts at D7, Vi-PS participants might have an older age, or more participants sequenced in a different batch that could affect the mean. By accounting for these factors/covariates we can more accurately estimate the mean gene expression for that group. These estimations are made using linear regression models.
+
+The next step is to calculate the fold change in the average modeled gene expression between groups, e.g Vi-PS/TCV at D7, or between different time points.
+
+The parameters we include in the model are specified within the *design matrix*, and the contrasts, or comparisons we would like to perform are specified within a *contrast matrix.*\
+As both design and contrast matrices relate to sample expression/count data/norm factors stored in DGE matrices, they need to all be the same dimensions.
+
+*Overall workflow:*
+- design –> voom (first time) –> duplicateCorrelation –> voom (second time) –> lmFit –> contrasts.fit –> eBayes –> TopTable –> Volcano 
+
+*Important Functions:*
+- `lmFit` computes coefficients, residual variances and standard errors. For your linear model, the leading coefficients correspond to average log-expression values for different conditions
+- `voom` Remove heteroskedasity in the data, - equalises variance. Necessary for RNA-seq data as it normalises the resiudals so they are no longer dependent on count size.
+- `duplicateCorrelation` calculates the correlation between samples within your data, this correlation can then be included in the linear model as a blocking factor
+- `contrasts.fit` converts the coefficients and standard errors to reflect the contrasts rather than the original design matrix, but does not compute t-statistics or p-values. As in the Limma manual: “The coefficients, unscaled standard deviations and correlation matrix are re-calculated in terms of the contrasts”
+- `eBayes` computes t-statistics and p-values from the coefficients and standard errors. Therefore running eBayes before contrast.fit will give non-sensical results in terms of obtained p-values.
+
+
 #### Design Matrix
 
 Generally, data preparation for DEG analysis utilises all the samples in your study, even the ones that you might not care about using or comparing initially, and keeps them in a matrix format (this allows R to easily subset conditions, based on matching row or column indices).
@@ -240,7 +264,7 @@ When deciding on what parameters to include in the model we can test for signifi
 The *design matrix* contains the model parameters we specify per each sample, and extracts this information from the corresponding metadata, i.e vaccine group, age, sequence_pool\
 It is set up so that rows are associated with samples and columns are associated with the specified model parameters.
 
-```{r, echo=FALSE}
+```{r add diagram, echo=FALSE}
 # Define variable containing url
 url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1ebb-48d6-a35c-007d3d42961c_figure2.gif"
 #html code to place and size below inline text
@@ -306,6 +330,7 @@ design <- design[,-c(8:9)]
 #Tidy new design colnames
 colnames(design)<-gsub("study_arm","",colnames(design))
 colnames(design)<-gsub("time_point3","",colnames(design))
+colnames(design) <- gsub("\\+", "plus", colnames(design))
 ```
 *Intercept terms*
 For a single explanatory variable a design matrix can be coded by `model.matrix(~variable)` to include an intercept term, or by model.matrix(~0+variable) to exclude the intercept term.\
@@ -336,12 +361,62 @@ Typically Voom plot shows higher variance for lower counts. If filtering was not
 
 When modelling gene expression between conditions using design/contrast matricies, we can now use our corrected data in the Voom object (S4), and visually check that we have removed the variance trend with log expression. 
 
+### Blocking factors
 
+As we have repeated measurements on the same participant/sample, we should account for the fact that gene expression across time points will correlate with the participant it was measured in. 
+
+Account for this using the cor.fit as a 'blocking factor' in the linear model
+```{r corfit}
+#Estimate the correlation between measurements made on the same subject:
+cor <- duplicateCorrelation(expression, design, block=id)
+cor$consensus.correlation
+
+corfit <- duplicateCorrelation(v, design=design, block=data$samples$lab_id)
+corfit$consensus #0.32
+
+#Voom 2 ####
+# Apply voom again on original data (with the block and correlation parameters this time)
+pdf(file = paste(plot_dir,"voom_2.pdf", sep = ""))
+v2 <- voom(data,design,
+           block = data$samples$lab_id, correlation = corfit$consensus,
+           plot=TRUE)
+dev.off()
+
+  #y, design, block = targets$Block, correlation = corfit$consensus)
+
+#Lmfit 1###
+fit <- lmFit(v2, design, block = data$samples$lab_id, correlation = corfit$consensus)
+```
 ### Contrast Matrix
 
 Our contrast matrix will go through all of our samples and indicate whether a sample is to be used compared, and which group it belongs to.\
 The matrix is set up as so that rows are associated with model parameters and columns represent the contrast of interest
 
-As both design and contrast matrix relate to sample expression/count data/norm factors stored in DGE matrices, they need to all be the same dimensions.
+```{r All contrast matricies, eval=FALSE}
+#dont delete
+
+#Comparisons to make
+#ViPS/ViTCV comb (all participants): 
+#   V0 - V1
+#   V0 - V7
+#   V0 - D0 (28 days post-vac)
+
+#Repeat above comparisons but also compare between vaccine groups
+
+```
+```{r Model gene expression between groups}
+
+#Contrast of interest
+cm <- makeContrasts(D28_postvac = D0-V0,
+                    D7_postvac = V7-V0,
+                    D1_postvac = V1-V0,
+                    levels = colnames(design))
+#Warning in contrasts.fit(fit, cm) : row names of contrasts don't match col names of coefficients #might just be how i've reformed the table, should all be the same
+
+#Estimate gene expression values and significance using eBayes
+fit2 <- contrasts.fit(fit, cm)
+fit2 <- eBayes(fit2)
+results <- topTable(fit2, number = Inf)
+```
 
 
