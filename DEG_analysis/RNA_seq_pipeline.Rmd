@@ -400,23 +400,226 @@ The matrix is set up as so that rows are associated with model parameters and co
 #   V0 - V1
 #   V0 - V7
 #   V0 - D0 (28 days post-vac)
-
 #Repeat above comparisons but also compare between vaccine groups
+cm <- makeContrasts(D28_postvac = D0-V0,
+                    D7_postvac = V7-V0,
+                    D1_postvac = V1-V0,
+                    levels = colnames(design))
+cm <- makeContrasts(D28_postvac = D0-V0,
+                    levels = colnames(design))
 
 ```
 ```{r Model gene expression between groups}
 
 #Contrast of interest
-cm <- makeContrasts(D28_postvac = D0-V0,
-                    D7_postvac = V7-V0,
-                    D1_postvac = V1-V0,
+cm <- makeContrasts(V1_postvac = V1-V0,
                     levels = colnames(design))
+
 #Warning in contrasts.fit(fit, cm) : row names of contrasts don't match col names of coefficients #might just be how i've reformed the table, should all be the same
 
 #Estimate gene expression values and significance using eBayes
 fit2 <- contrasts.fit(fit, cm)
 fit2 <- eBayes(fit2)
-results <- topTable(fit2, number = Inf)
+V1 <- topTable(fit2, number = Inf) #D28 #V7 #V1
+
+
+plotSA(fit2) #check variance post-voom
+```
+### Data visualisation
+```{r General Volcano Plots}
+#Volcano Plots ####
+
+deg = V1 # UPDATE 2 current results table 
+plot_name = c("V1.pdf")
+plot_title = c("24h Post-Vaccination")
+
+#Intital plot
+p <- ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val)))+
+        geom_point()+
+        theme_minimal()
+p #Volcano plot no-longer skewed :)
+
+#Genes to highlight on plot
+#mutate BAFF and APRIL
+deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
+deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
+gene_list2 <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A", "BAFF", "APRIL")
+gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
+
+neut_list <- c("APRIL", "BAFF","IL1B")
+
+#Determine stat significance ##
+#p = 0.05
+p <- -log10(0.05)
+raw_p <- 0.05
+#calculate MT threshold (BH method)
+#Convert 0.05 adj-p back into an unadjusted p-value, then -log
+#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it
+# FDR < 0.05
+adj.p <- deg[(deg$adj.P.Val <= "0.051"),c("P.Value", "adj.P.Val")]
+adj.p <- adj.p[order(-adj.p$adj.P.Val),]
+adj.p <- adj.p[1,1] #Get p-value for line
+raw_ap <- adj.p
+adj.p <- -log10(adj.p)
+
+deg <- deg %>%
+  mutate(reg =
+           case_when(
+    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC >= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    deg$logFC <= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "No Change",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "No Change",
+    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "No Change")) %>%
+  mutate(reg =
+           factor(reg, levels =
+                    c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
+
+label <- deg[(deg$gene_name %in% neut_list),] #UPDATE to list of interest
+sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" ) & (deg$gene_name %in% neut_list),]
+
+#Plot volcano plot
+vol <-
+  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
+  geom_point(aes(color = P.Value, alpha=0.98))+
+  labs(title = plot_title) +
+  theme_minimal() +theme(legend.position = "none") +
+  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
+  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
+  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
+  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
+vol
+
+
+#"yellow","orange","#ef5a3a","#800000","darkred"
+
+pdf(file = paste(plot_dir, "sig_neut", plot_name, sep = "")) #UPDATE plot title
+vol
+dev.off()
+
+```
+### Results:
+
+*D28 notes*
+
+- Most genes return to baseline/not many sig genes
+- To be expected 1-month post-vac
+- Relabel vol with sig genes
+
+*D7 notes*
+
+- No sig change in FcRs
+- Quite a skewed volcano
+
+*D1 notes*
+
+- FcRs 2a 1a sig upreg
+- Neut genes sig up reg
+
+#### Plot Pipeline
+
+- input toptable results file
+- speficy directories + plot names
+- can modify highlighted genes/sig levels
+
+
+```{r Volcano Plots}
+
+#B-helper neut Volcano Plot####
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# UPDATE file and plot names
+deg = V1 
+system("mkdir ~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1")
+plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1/")
+plot_name = c("V1_sig_neut.pdf")
+plot_title = c("24h Post-Vaccination")
+
+
+#Genes to highlight
+deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
+deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
+neut_list <- c("APRIL", "BAFF","IL1B")
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Determine stat significance
+p <- -log10(0.05)
+raw_p <- 0.05
+#calculate MT threshold (BH method)
+#Convert 0.05 adj-p back into an unadjusted p-value, then -log
+#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it
+# FDR < 0.05
+adj.p <- deg[(deg$adj.P.Val <= "0.051"),c("P.Value", "adj.P.Val")]
+adj.p <- adj.p[order(-adj.p$adj.P.Val),]
+adj.p <- adj.p[1,1] #Get p-value for line
+raw_ap <- adj.p
+adj.p <- -log10(adj.p)
+
+deg <- deg %>%
+  mutate(reg =
+           case_when(
+    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
+    deg$logFC >= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    deg$logFC <= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "No Change",
+    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "No Change",
+    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "No Change")) %>%
+  mutate(reg =
+           factor(reg, levels =
+                    c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
+#Lables
+label <- deg[(deg$gene_name %in% neut_list),] #UPDATE to list of interest
+sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" )
+                 & (deg$gene_name %in% neut_list),]
+
+#Plot volcano
+vol <-
+  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
+  geom_point(aes(color = P.Value, alpha=0.98))+
+  labs(title = plot_title) +
+  theme_minimal() +theme(legend.position = "none") +
+  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
+  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
+  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
+  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
+vol
+
+#Save file
+pdf(file = paste(plot_dir, plot_name, sep = ""))
+vol
+dev.off()
+
+#FcR Volcano Plot####
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+plot_name = c("V1_sig_Fc.pdf")
+
+#Update labels to genes of interest
+gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
+label <- deg[(deg$gene_name %in% gene_list),]
+sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" ) & (deg$gene_name %in% gene_list),]
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Plot volcano plot
+vol <-
+  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
+  geom_point(aes(color = P.Value, alpha=0.98))+
+  labs(title = plot_title) +
+  theme_minimal() +theme(legend.position = "none") +
+  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
+  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
+  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
+  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
+vol
+
+pdf(file = paste(plot_dir, plot_name, sep = ""))
+vol
+dev.off()
 ```
 
 
