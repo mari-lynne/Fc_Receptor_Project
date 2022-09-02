@@ -1,4 +1,4 @@
-#Just cm function ####
+#Just contrast matrix function ####
 
 make_contrasts <- function (group, control, delim="_vs_", des_mat){
   #/ define groups and baseline to make contrasts
@@ -35,9 +35,7 @@ make_contrasts <- function (group, control, delim="_vs_", des_mat){
 }
 
 #output testing
-results <- make_contrasts(group = c("V7", "V1", "D0", "V0"), control = c("V0"), des_mat = design)
-
-
+#results <- make_contrasts(group = c("V7", "V1", "D0", "V0"), control = c("V0"), des_mat = design)
 
 #Combo with ebayes #####
 
@@ -102,6 +100,6 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
   return(limma_list)
 }
   
-#Output testing ####
-results2 <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design)
+#Output testing 
+#results2 <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design)
 
