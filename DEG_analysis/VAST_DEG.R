@@ -172,7 +172,17 @@ save.image(file = "VAST_deg.RData")
 #Or can I add covars into splines model as long as I keep them in the ggpot DF
 #read up on geom_smooth
 
+#Draft steps - Per participant/Per gene analysis####
 
+#Aims:
+
+#In order to extract data for splines modelling we need to get individual gene expression data per participant
+#Unlike micro-array data, RNA-seq data also has to take into account library size and normalisation factors which are accounted for when running limma voom
+#Limma voom measures variance of genes - calculates normalisation factors
+
+#1) extract data from limma voom object (S4 syntax)
+#2) Update gene IDs
+#
 
 exprs <- v$E
 gene <- v$genes
@@ -181,7 +191,7 @@ designV <- v$design
 
 #514 participants
 
-#update colnames by using meta
+#Update colnames by using meta
 IDs <- meta$lab_id
 Time <- meta$time_point3
 test <- paste(IDs,Time,sep = "_") #can use gsub to clean
