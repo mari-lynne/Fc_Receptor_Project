@@ -5,7 +5,7 @@ date: '2022-08-29'
 output: html_document
 ---
 
-```{r Rmd setup, include=FALSE}
+```{r Rmd setup}
 knitr::opts_chunk$set(echo = TRUE, eval = TRUE, error = TRUE)
 knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd for Rmd
 ```
@@ -46,8 +46,8 @@ Source Materials:
 
 ### Set up and tidy data
 
-```{r Set Directories, include = FALSE}
-setwd("~/RNA/Daniel") #where data is saved
+```{r Set Directories, warning=FALSE, message=FALSE}
+setwd("/home/mari/RNA/Daniel") #where data is saved
 plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/pre-process/") #where to save output plots
 
 #load packages #
@@ -67,8 +67,101 @@ library(Glimma)
 library(RColorBrewer)
 ```
 
+```{r functions}
+#Just contrast matrix function ####
+make_contrasts <- function (group, control, delim="_vs_", des_mat){
+  #/ define groups and baseline to make contrasts
+  
+  suppressMessages(require(limma))
+  
+  #Checks
+  if(is.null(group)) stop("Error: group arg is missing")
+  
+  #/ ensure unique group levels
+  group <- sort(unique(as.character(group)))
+  
+  #Write limma code by pasting groups
+  #/ if control var is present, compare all groups to control
+  #/  else make all comparisons using combn function
+  if (!missing(control)){
+    combo <- paste0(group,"-",  control)
+  } else{
+    combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])})
+  }
+  
+  #/ make contrasts
+  if (!missing(des_mat)){
+  contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(des_mat))
+  }else{
+    contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
+    message("No Design Matrix provided, using only defined contrasts for matrix")
+  }
+  colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
+  #Todo: levels need to be design matrix, poss modify to have group or design option later
+  #Only do lmfit step if design and fit are supplied
+  
+  return(contrasts)
+}
+
+
+#Combo with ebayes #####
+contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="TRUE"){
+  #Define groups and baseline to make contrasts
+  #Input design and previous model fit model for it to work
+  #Toptab gives option to output results
+  
+  #/ Checks
+  suppressMessages(require(limma))
+  if(is.null(group)) stop("Error: group arg is missing")
+  
+  #/ Ensure unique group levels
+  group <- sort(unique(as.character(group)))
+  
+  #/ Define contrasts 
+  if (!missing(control)){ #compare to control
+    combo <- paste0(group,"-",  control)
+  } else{ #make all pairwise comparisons
+    combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])}) 
+  }
+  
+  #/ Make contrast matrix
+  if (!missing(des_mat)){
+    contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(design))
+  }else{ #No design + no efit
+    contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
+    message("No Design Matrix provided, using only defined contrasts for matrix")
+  } 
+  colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
+  
+ 
+  #/ Model fit and deg results
+  if (!missing(efit) & !missing(des_mat) & topTab == "TRUE"){ #Requires efit and dmat args
+    fit2 <- contrasts.fit(efit, contrasts)
+    fit2 <- eBayes(fit2)
+    message("Performing ebayes fit of linear model")
+    top_results <- list() #TopTable Results
+    for (i in colnames(contrasts)){
+      top_results[[i]] <- topTable(fit2, coef = i, number = Inf)
+      limma_list <- list(contrasts = contrasts, fit2 = fit2, top_results = top_results)
+    }
+    message("Contrast matrix (contrasts), ebayes (fit2), top DEGs (top_results) saved in list\n
+          Subset list with either $ or [[]] for results")
+  } else if (!missing(efit) & !missing(des_mat) & topTab != "TRUE"){ #Without toptable option
+    fit2 <- contrasts.fit(efit, contrasts)
+    fit2 <- eBayes(fit2)
+    message("Performing ebayes fit of linear model")
+    limma_list <- list(contrasts = contrasts, fit2 = fit2)
+  } else if (missing(efit) | missing(des_mat)) {
+    limma_list <- list(contrasts)
+    warning("No linear model or design matrix supplied, returning contrast matrix only")
+  }
+  return(limma_list)
+}
+
+```
+
 ```{r Set up Data, include = FALSE}
-load("Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
+load("/home/mari/RNA/Daniel/Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
 data <- VAST_autosomes #RNAseq data set
 #rm(VAST_autosomes)
 
@@ -287,13 +380,13 @@ url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1e
 
 ```{r Design Matrix, results='hide'}
 pData <- data$samples
-str(pData)
+#str(pData)
 #Change sequence pool to factor
 data$samples$sequence_pool <- as.factor(data$samples$sequence_pool)
 
 #Check for Nas
 test <- data$samples[sapply(data$samples, function(x) sum(is.na(x))),]
-View(test) #samples have data for the design categories, however are missing levels of time factor which results in them being ommited from model.matrix - it was the vaccine rip
+#samples have data for the design categories, however are missing levels of time factor which results in them being ommited from model.matrix - it was the vaccine rip
 
 #Model design matrix
 design <- model.matrix(~0+ time_point3 + study_arm + sex + sequence_pool, data = data$samples)
@@ -317,7 +410,7 @@ qr(design)$rank # Unequal ncol-rank = linear dependencies present
 rankifremoved <- sapply(1:ncol(design), function (x) qr(design[,-x])$rank)
 #Column (design factor) if removed, that result in the highest rank are the linearly dependent ones (since removing those does not decrease rank, while removing a linearly independent column does).
 which(rankifremoved == max(rankifremoved))
-detect.lindep(design) #or use function from library(plm)
+#detect.lindep(design) #or use function from library(plm)
 
 
 # 3) Remove Problem variables
@@ -326,6 +419,8 @@ detect.lindep(design) #or use function from library(plm)
 colSums(design) == 0
 design <- design[,-c(8:9)] 
 #Re-check rank/ncol
+ncol(design) 
+qr(design)$rank
 
 #Tidy new design colnames
 colnames(design)<-gsub("study_arm","",colnames(design))
@@ -349,7 +444,7 @@ The voom function normalises/adjusts variance so it is no longer dependent on co
 As the voom function is normalising the residuals around a fitted model, we need to input the design matrix as described in section 2, which specifies linear model variables, to perform voom accordingly
 
 
-```{r Voom}
+```{r Voom 1}
 #Plots mean count size (x) against variance (y)
 #Lower counts tend to have lower variance
 #Therefore voom normalises - flattens this trend
@@ -368,9 +463,6 @@ As we have repeated measurements on the same participant/sample, we should accou
 Account for this using the cor.fit as a 'blocking factor' in the linear model
 ```{r corfit}
 #Estimate the correlation between measurements made on the same subject:
-cor <- duplicateCorrelation(expression, design, block=id)
-cor$consensus.correlation
-
 corfit <- duplicateCorrelation(v, design=design, block=data$samples$lab_id)
 corfit$consensus #0.32
 
@@ -387,40 +479,24 @@ dev.off()
 #Lmfit 1###
 fit <- lmFit(v2, design, block = data$samples$lab_id, correlation = corfit$consensus)
 ```
+
+```{r Save/load limma voom data}
+#save.image(file = "VAST_RNAseq.RData")
+load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
+
+
+
+```
+
 ### Contrast Matrix
 
 Our contrast matrix will go through all of our samples and indicate whether a sample is to be used compared, and which group it belongs to.\
 The matrix is set up as so that rows are associated with model parameters and columns represent the contrast of interest
 
 ```{r All contrast matricies, eval=FALSE}
-#dont delete
+#Use contrasts_2_lm function to model all designed comparisons between control/baseline and output toptable results
 
-#Comparisons to make
-#ViPS/ViTCV comb (all participants): 
-#   V0 - V1
-#   V0 - V7
-#   V0 - D0 (28 days post-vac)
-#Repeat above comparisons but also compare between vaccine groups
-cm <- makeContrasts(D28_postvac = D0-V0,
-                    D7_postvac = V7-V0,
-                    D1_postvac = V1-V0,
-                    levels = colnames(design))
-cm <- makeContrasts(D28_postvac = D0-V0,
-                    levels = colnames(design))
-
-```
-```{r Model gene expression between groups}
-
-#Contrast of interest
-cm <- makeContrasts(V1_postvac = V1-V0,
-                    levels = colnames(design))
-
-#Warning in contrasts.fit(fit, cm) : row names of contrasts don't match col names of coefficients #might just be how i've reformed the table, should all be the same
-
-#Estimate gene expression values and significance using eBayes
-fit2 <- contrasts.fit(fit, cm)
-fit2 <- eBayes(fit2)
-V1 <- topTable(fit2, number = Inf) #D28 #V7 #V1
+results <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design, topTab="TRUE")
 
 
 plotSA(fit2) #check variance post-voom
