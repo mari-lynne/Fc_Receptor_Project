@@ -92,4 +92,3 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
 
 #Output testing 
 results2 <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"), efit=fit, des_mat = design)
-
