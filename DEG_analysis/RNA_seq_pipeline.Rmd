@@ -53,6 +53,8 @@ plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/pre-process/") #where to save output
 #load packages #
 library(dplyr)
 library(data.table)
+library(ggplot2)
+library(ggrepel) 
 library(tidyr)
 library(tidylog)
 library(limma)
@@ -157,6 +159,84 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
   }
   return(limma_list)
 }
+
+#Volcano plot function ####
+
+plot_vol <- function(deg, p = 0.05, FC = 0,
+                     lab_type= "top", genes, top = 20,
+                     gene_col = "gene_name", #colname with gene_IDs
+                     title="", alpha = 0.98,
+                     colours = c("#a50000","#800000","#ef5a3a","orange","yellow")) {
+
+  
+#/ Checks
+if (missing(deg)){
+  stop("Error: deg arg is missing. Please provide a toptable data frame")} 
+#if (!missing(genes) & !is.character(genes)){
+  #stop("Error: label is not a character vector")}
+if (!missing(lab_type) & lab_type != c('top') & missing(genes)) {
+  stop("Error: label requires character vector with selected genes")}
+
+  #/ 1) Define sig values
+  log_p <- -log10(p)
+  #Adj p values #need to convert adjusted p-val to unadjusted for plot yscale
+  values <- seq(0.050,0.051, by=0.00001)
+  deg$adj.P.Val <- round(deg$adj.P.Val, 5) #This is such a janky way I apologise
+  adj.p <- deg[(deg$adj.P.Val %in% (values)),c("P.Value")] 
+  adj.p <-  min(adj.p)
+  log_adj <- -log10(adj.p)
+  
+  ##/Set up reg table 2)
+ 
+  deg <- deg %>%
+    mutate(reg =
+             case_when(
+               deg$logFC >= FC & deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
+               deg$logFC <= FC & deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
+               deg$logFC >= FC & deg$P.Value <= p ~ "Sig P <0.05",
+               deg$logFC <= FC & deg$P.Value <= p ~ "Sig P <0.05",
+               abs(deg$logFC) <= FC & deg$adj.P.Val >= p ~ "No Change",
+               abs(deg$logFC) <= FC & deg$adj.P.Val <= p ~ "No Change",
+               abs(deg$logFC) > FC & deg$adj.P.Val >p ~ "No Change")) %>%
+    mutate(reg =
+             factor(reg, levels =
+                      c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
+  
+  #Define labels 3)
+  
+  if (is.null(lab_type)){#No entry for lab list, currently there's no default arg
+    gene_label <- c("")
+    lab_data <- NULL #Empty dataframe, need to work out how not to error
+    warning("No genes highlighted")
+  } else if(lab_type == "sig"){
+      gene_label <- genes
+      lab_data <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" )
+                    & (deg$gene_col %in% genes),]
+  } else if (lab_type == "ns"){
+        gene_label <- genes
+        lab_data <- deg[(deg$gene_col %in% genes),]}
+    else if (lab_type == "top"){
+          lab_data <- slice_min(deg,adj.P.Val,n=top)
+          gene_label <- lab_data$gene_col
+  }
+
+
+#Plot Volcano 4)
+vol <-
+  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
+  geom_point(aes(color = P.Value, alpha=alpha))+
+  labs(title = title) +
+  theme_minimal() +theme(legend.position = "none") +
+  geom_hline(yintercept = log_p, linetype = 2.5, alpha =0.7) +
+  geom_hline(yintercept =log_adj, linetype = 2.5, alpha =0.7)+
+  geom_label_repel(data=lab_data,
+                   size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,
+                   angle= 70,vjust= 0,segment.size= 0.5,
+                   segment.color="#331002",fill="#f7f7f5")+
+  scale_color_gradientn(colours = colours,
+                        values=c(0,adj.p,p,1))
+return(vol)
+} 
 
 ```
 
@@ -378,6 +458,13 @@ url <- "https://f1000researchdata.s3.amazonaws.com/manuscripts/30844/e0cd78d8-1e
 4) Remove null variables
       - Vars with all 0s or NAs add nothing to the model so can be removed
 
+*Linear dependencies notes*  
+- The rank of the matrix is the total number of independent columns/vectors in the matrix.
+- So if our matrix rank is smaller than the number of columns, then there must be linear dependencies, i.e that vector can be made up by either a copy of or multiplying another one of the vectors.
+- A vector of all zeros will also count as a dependent vector, therefore need to remove these (as well as it being redundant for the model anyways)
+
+- VAST Notes: My bet is on time_point and study arm, as the control group wont have vac time points, therefore should nest these factors? Update - removed control group from orignal data and design, also time_point D14 when checking using interaction time*vaccine, only had Vi-PS samples. So if you were to include D14 as a time point in the model you would also just be measuring the effects of Vi-PS, therefore for now when looking at both vaccine groups, excluding D14 from analysis
+
 ```{r Design Matrix, results='hide'}
 pData <- data$samples
 #str(pData)
@@ -390,19 +477,9 @@ test <- data$samples[sapply(data$samples, function(x) sum(is.na(x))),]
 
 #Model design matrix
 design <- model.matrix(~0+ time_point3 + study_arm + sex + sequence_pool, data = data$samples)
-
 #Leave out diagnosis for now
-#Vaccine and diagnosis - linearly dependent on time
-#Therefore should make new factor time*vaccine
 
-#Check linear dependencies ####
-#The rank of the matrix is the total number of independent columns/vectors in the matrix.
-#So if our matrix rank is smaller than the number of columns, then there must be linear dependencies, i.e that vector can be made up by either a copy of or multiplying another one of the vectors.
-# A vector of all zeros will also count as a dependent vector, therefore need to remove these (as well as it being redundant for the model anyways)
-
-#Notes: My bet is on time_point and study arm, as the control group wont have vac time points, therefore should nest these factors? Update - removed control group from orignal data and design, also time_point D14 when checking using interaction time*vaccine, only had Vi-PS samples. So if you were to include D14 as a time point in the model you would also just be measuring the effects of Vi-PS, therefore for now when looking at both vaccine groups, excluding D14 from analysis
-
-# 1) Test for linear dependencies
+# 1) Test for linear dependencies ####
 ncol(design) 
 qr(design)$rank # Unequal ncol-rank = linear dependencies present
 
@@ -410,8 +487,6 @@ qr(design)$rank # Unequal ncol-rank = linear dependencies present
 rankifremoved <- sapply(1:ncol(design), function (x) qr(design[,-x])$rank)
 #Column (design factor) if removed, that result in the highest rank are the linearly dependent ones (since removing those does not decrease rank, while removing a linearly independent column does).
 which(rankifremoved == max(rankifremoved))
-#detect.lindep(design) #or use function from library(plm)
-
 
 # 3) Remove Problem variables
 #Remove null variables, i.e = all 0s or NAs (Control)
@@ -481,11 +556,8 @@ fit <- lmFit(v2, design, block = data$samples$lab_id, correlation = corfit$conse
 ```
 
 ```{r Save/load limma voom data}
-#save.image(file = "VAST_RNAseq.RData")
-load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
-
-
-
+#save.image(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
+#load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
 ```
 
 ### Contrast Matrix
@@ -493,50 +565,67 @@ load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
 Our contrast matrix will go through all of our samples and indicate whether a sample is to be used compared, and which group it belongs to.\
 The matrix is set up as so that rows are associated with model parameters and columns represent the contrast of interest
 
-```{r All contrast matricies, eval=FALSE}
-#Use contrasts_2_lm function to model all designed comparisons between control/baseline and output toptable results
+```{r All contrast matricies}
+#Use contrasts_2_lm function to model designated comparisons between control/baseline
+#Also outputs toptable results
 
-results <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design, topTab="TRUE")
+#Comparing D1, D7 and 28 days post-vac with baseline
+results <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design)
 
+cm <- results$contrasts
+fit2 <- results$fit2
+toptables <- results$top_results
 
 plotSA(fit2) #check variance post-voom
 ```
+
+
 ### Data visualisation
+
+```{r Volcano plots}
+
+#Use vol_plot function
+
+
+
+```
+
+
+
 ```{r General Volcano Plots}
 #Volcano Plots ####
+
+deg <- toptables$V1_vs_V0
 
 deg = V1 # UPDATE 2 current results table 
 plot_name = c("V1.pdf")
 plot_title = c("24h Post-Vaccination")
 
+
 #Intital plot
 p <- ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val)))+
         geom_point()+
         theme_minimal()
-p #Volcano plot no-longer skewed :)
 
-#Genes to highlight on plot
 #mutate BAFF and APRIL
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
 gene_list2 <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A", "BAFF", "APRIL")
 gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
-
 neut_list <- c("APRIL", "BAFF","IL1B")
 
 #Determine stat significance ##
 #p = 0.05
 p <- -log10(0.05)
 raw_p <- 0.05
-#calculate MT threshold (BH method)
-#Convert 0.05 adj-p back into an unadjusted p-value, then -log
-#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it
-# FDR < 0.05
-adj.p <- deg[(deg$adj.P.Val <= "0.051"),c("P.Value", "adj.P.Val")]
-adj.p <- adj.p[order(-adj.p$adj.P.Val),]
-adj.p <- adj.p[1,1] #Get p-value for line
-raw_ap <- adj.p
-adj.p <- -log10(adj.p)
+#calculate MT threshold (BH method) # FDR < 0.05
+#Convert 0.05 adj-p back into an unadjusted p-value, then -log so we can get values for plot
+#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it, my maths is crap so subsetting table for now
+values <- seq(0.050,0.051, by=0.00001)
+deg$adj.P.Val <- round(deg$adj.P.Val, 5) #This is such a janky way I apologise
+  adj.p <- deg[(deg$adj.P.Val %in% (values)),c("P.Value")] 
+  adj.p <-  min(adj.p)
+  log_adj <- -log10(adj.p)
 
 deg <- deg %>%
   mutate(reg =
@@ -602,100 +691,42 @@ dev.off()
 
 ```{r Volcano Plots}
 
-#B-helper neut Volcano Plot####
+#V1 vols ####
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-# UPDATE file and plot names
-deg = V1 
-system("mkdir ~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1")
+# UPDATE file dirs and data
+#system("mkdir ~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1")
 plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1/")
-plot_name = c("V1_sig_neut.pdf")
-plot_title = c("24h Post-Vaccination")
+plot_title <- c("24h Post-vaccination")
+
+deg <- toptables$V1_vs_V0 
 
 
-#Genes to highlight
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Modify gene names
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
-neut_list <- c("APRIL", "BAFF","IL1B")
+genes_neut <- c("APRIL", "BAFF","IL1B")
+genes_fc <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#Determine stat significance
-p <- -log10(0.05)
-raw_p <- 0.05
-#calculate MT threshold (BH method)
-#Convert 0.05 adj-p back into an unadjusted p-value, then -log
-#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it
-# FDR < 0.05
-adj.p <- deg[(deg$adj.P.Val <= "0.051"),c("P.Value", "adj.P.Val")]
-adj.p <- adj.p[order(-adj.p$adj.P.Val),]
-adj.p <- adj.p[1,1] #Get p-value for line
-raw_ap <- adj.p
-adj.p <- -log10(adj.p)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-deg <- deg %>%
-  mutate(reg =
-           case_when(
-    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
-    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
-    deg$logFC >= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
-    deg$logFC <= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "No Change",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "No Change",
-    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "No Change")) %>%
-  mutate(reg =
-           factor(reg, levels =
-                    c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
-#Lables
-label <- deg[(deg$gene_name %in% neut_list),] #UPDATE to list of interest
-sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" )
-                 & (deg$gene_name %in% neut_list),]
+top <- plot_vol(deg, lab = 'top', title = plot_title)
+neut <-plot_vol(deg, lab = 'sig',genes = genes_neut, title = plot_title)
+fc <- plot_vol(deg, lab = 'sig',genes = genes_fc, title = plot_title)
 
-#Plot volcano
-vol <-
-  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
-  geom_point(aes(color = P.Value, alpha=0.98))+
-  labs(title = plot_title) +
-  theme_minimal() +theme(legend.position = "none") +
-  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
-  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
-  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
-  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
-vol
-
-#Save file
-pdf(file = paste(plot_dir, plot_name, sep = ""))
-vol
+#Save plots ####
+pdf(file = paste(plot_dir, "sig_neut.pdf", sep = ""))
+neut
 dev.off()
-
-#FcR Volcano Plot####
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-plot_name = c("V1_sig_Fc.pdf")
-
-#Update labels to genes of interest
-gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
-label <- deg[(deg$gene_name %in% gene_list),]
-sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" ) & (deg$gene_name %in% gene_list),]
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#Plot volcano plot
-vol <-
-  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
-  geom_point(aes(color = P.Value, alpha=0.98))+
-  labs(title = plot_title) +
-  theme_minimal() +theme(legend.position = "none") +
-  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
-  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
-  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
-  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
-vol
-
-pdf(file = paste(plot_dir, plot_name, sep = ""))
-vol
+pdf(file = paste(plot_dir, "sig_fc.pdf", sep = ""))
+fc
 dev.off()
+pdf(file = paste(plot_dir, "topgenes.pdf", sep = ""))
+fc
+dev.off()
+fc
 ```
 
-
+#Todo check labels in plot_vol code
