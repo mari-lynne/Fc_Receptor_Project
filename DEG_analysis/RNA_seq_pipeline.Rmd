@@ -579,108 +579,7 @@ toptables <- results$top_results
 plotSA(fit2) #check variance post-voom
 ```
 
-
 ### Data visualisation
-
-```{r Volcano plots}
-
-#Use vol_plot function
-
-
-
-```
-
-
-
-```{r General Volcano Plots}
-#Volcano Plots ####
-
-deg <- toptables$V1_vs_V0
-
-deg = V1 # UPDATE 2 current results table 
-plot_name = c("V1.pdf")
-plot_title = c("24h Post-Vaccination")
-
-
-#Intital plot
-p <- ggplot(data=deg, aes(x=logFC, y=-log10(adj.P.Val)))+
-        geom_point()+
-        theme_minimal()
-
-#mutate BAFF and APRIL
-deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
-deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
-gene_list2 <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A", "BAFF", "APRIL")
-gene_list <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
-neut_list <- c("APRIL", "BAFF","IL1B")
-
-#Determine stat significance ##
-#p = 0.05
-p <- -log10(0.05)
-raw_p <- 0.05
-#calculate MT threshold (BH method) # FDR < 0.05
-#Convert 0.05 adj-p back into an unadjusted p-value, then -log so we can get values for plot
-#Rearrange BH formula to find p or subset results for ad.jp = 0.05 and use it's equivalent p value as the estimate and log it, my maths is crap so subsetting table for now
-values <- seq(0.050,0.051, by=0.00001)
-deg$adj.P.Val <- round(deg$adj.P.Val, 5) #This is such a janky way I apologise
-  adj.p <- deg[(deg$adj.P.Val %in% (values)),c("P.Value")] 
-  adj.p <-  min(adj.p)
-  log_adj <- -log10(adj.p)
-
-deg <- deg %>%
-  mutate(reg =
-           case_when(
-    deg$logFC >= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
-    deg$logFC <= 0 & deg$adj.P.Val <= 0.05 ~ "Sig Adj. P <0.05",
-    deg$logFC >= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
-    deg$logFC <= 0 & deg$P.Value <= 0.05 ~ "Sig P <0.05",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val >= 0.05 ~ "No Change",
-    abs(deg$logFC) <= 0 & deg$adj.P.Val <= 0.05 ~ "No Change",
-    abs(deg$logFC) > 0 & deg$adj.P.Val >0.05 ~ "No Change")) %>%
-  mutate(reg =
-           factor(reg, levels =
-                    c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
-
-label <- deg[(deg$gene_name %in% neut_list),] #UPDATE to list of interest
-sig_label <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" ) & (deg$gene_name %in% neut_list),]
-
-#Plot volcano plot
-vol <-
-  deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
-  geom_point(aes(color = P.Value, alpha=0.98))+
-  labs(title = plot_title) +
-  theme_minimal() +theme(legend.position = "none") +
-  geom_hline(yintercept = p, linetype = 2.5, alpha =0.7) +
-  geom_hline(yintercept =adj.p, linetype = 2.5, alpha =0.7)+
-  geom_label_repel(data=sig_label, size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,angle= 70,vjust= 0,segment.size= 0.5,segment.color="#331002",fill="#f7f7f5")+
-  scale_color_gradientn(colours = c("#a50000","#800000","#ef5a3a","orange","yellow"),values=c(0,raw_ap,raw_p,1))
-vol
-
-
-#"yellow","orange","#ef5a3a","#800000","darkred"
-
-pdf(file = paste(plot_dir, "sig_neut", plot_name, sep = "")) #UPDATE plot title
-vol
-dev.off()
-
-```
-### Results:
-
-*D28 notes*
-
-- Most genes return to baseline/not many sig genes
-- To be expected 1-month post-vac
-- Relabel vol with sig genes
-
-*D7 notes*
-
-- No sig change in FcRs
-- Quite a skewed volcano
-
-*D1 notes*
-
-- FcRs 2a 1a sig upreg
-- Neut genes sig up reg
 
 #### Plot Pipeline
 
@@ -729,4 +628,23 @@ dev.off()
 fc
 ```
 
-#Todo check labels in plot_vol code
+*Todo* check labels in plot_vol function code
+
+
+### Results:
+
+*D28 notes*
+
+- Most genes return to baseline/not many sig genes
+- To be expected 1-month post-vac
+- Relabel vol with sig genes
+
+*D7 notes*
+
+- No sig change in FcRs
+- Quite a skewed volcano
+
+*D1 notes*
+
+- FcRs 2a 1a sig upreg
+- Neut genes sig up reg
