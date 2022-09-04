@@ -92,3 +92,51 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
 
 #Output testing 
 results2 <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"), efit=fit, des_mat = design)
+
+# Update 5/9/22
+
+#/ requires option to do all comparisons automatically to control if no group is specified
+#/ Add in automatic group comparison
+# / not fixed yet - man input groups 4 now
+
+
+make_contrasts <- function (group="all", control, delim="_vs_", des_mat){
+  #/ define groups and baseline to make contrasts
+  
+  suppressMessages(require(limma))
+  
+  #Checks
+  #if(is.null(group)) stop("Error: group arg is missing")
+  #instead replace with deault arg 
+  #Define var as all levels - control var # but if group and des is missing then it will have to error
+  
+  #/ ensure unique group levels
+  group <- sort(unique(as.character(group)))
+  
+  #Write limma code by pasting groups
+
+  if (!missing(control) & group !="all"){ #/ if control var is present, and groups specified, compare all groups to control
+    combo <- paste0(group,"-",  control)
+  } else if (!missing(control) & group =="all" & !missing(des_mat)){ #/ if control var is present, and no groups specified, compare all levels of design matrix as groups to control
+    combo <- combn(colnames(des_mat), 2, FUN = function(x){paste0(x[1], "-", x[2])})
+    combo <- grep(control, combo) #only keeping comparisons to control
+  } else if (missing(control)){ #make all comparisons using combn function
+    combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])}) #This is subsetting fields to paste
+  }
+  
+  
+  #/ make contrasts
+  if (!missing(des_mat)){
+    contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(des_mat))
+  }else{
+    contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
+    message("No Design Matrix provided, using only defined contrasts for matrix")
+  }
+  colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
+  #Todo: levels need to be design matrix, poss modify to have group or design option later
+  #Only do lmfit step if design and fit are supplied
+  
+  return(contrasts)
+}
+
+tests <- make_contrasts(group = c("time7", "time4"),control = c("time0"), des_mat = design)
