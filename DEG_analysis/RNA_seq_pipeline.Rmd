@@ -12,8 +12,8 @@ knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd fo
 
 ### Aims:
 
-1)  To pre-process RNAseq data for typhoid challenge and vaccination studies
-2)  To run differential gene expression analysis at a global and gene level scale
+1)  Pre-process RNAseq data for typhoid challenge and vaccination studies
+2)  Run differential gene expression analysis at both a global level, and idividual gene scale
 
 ### Overview of chapters
 
@@ -24,9 +24,10 @@ knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd fo
 -   Transform and normalise data
 -   Limma Voom
 
-2)  Differential gene expression analysis
+2)  DGE analysis
 
 -   Create design matrix
+-   Contrast matrix
 -   Fit linear model for comparisons of interest
 
 3)  Volcano Plots
@@ -42,11 +43,17 @@ knitr::opts_knit$set(root.dir = '/home/mari/RNA/Daniel') #Permanently sets wd fo
 -   Visualise changes in gene expression using fitted splines/box plots
 -   Test for statistical significance
 
-Source Materials: - <https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html> - <https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html> - <https://www.youtube.com/watch?v=z36fu178jIQ&ab_channel=LiquidBrainBioinformatics>
+Materials:
+
+-   <https://ucdavis-bioinformatics-training.github.io/2018-June-RNA-Seq-Workshop/thursday/DE.html>
+
+-   <https://www.bioconductor.org/packages/devel/workflows/vignettes/RNAseq123/inst/doc/limmaWorkflow.html>
+
+-   <https://www.youtube.com/watch?v=z36fu178jIQ&ab_channel=LiquidBrainBioinformatics>
 
 ## 1) Pre-processing
 
-### R set up
+### R set up and Functions
 
 ```{r Set Directories, warning=FALSE, message=FALSE, error = FALSE}
 setwd("/home/mari/RNA/Daniel") #where data is saved
@@ -73,13 +80,14 @@ library(RColorBrewer)
 
 ```{r functions}
 #Just contrast matrix function ####
-make_contrasts <- function (group, control, delim="_vs_", des_mat){
+make_contrasts <- function (group, control, delim = "_vs_", des_mat) {
   #/ define groups and baseline to make contrasts
   
   suppressMessages(require(limma))
   
   #Checks
-  if(is.null(group)) stop("Error: group arg is missing")
+  if (is.null(group))
+    stop("Error: group arg is missing")
   
   #/ ensure unique group levels
   group <- sort(unique(as.character(group)))
@@ -87,17 +95,22 @@ make_contrasts <- function (group, control, delim="_vs_", des_mat){
   #Write limma code by pasting groups
   #/ if control var is present, compare all groups to control
   #/  else make all comparisons using combn function
-  if (!missing(control)){
-    combo <- paste0(group,"-",  control)
+  if (!missing(control)) {
+    combo <- paste0(group, "-",  control)
   } else{
-    combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])})
+    combo <- combn(group,2,
+      FUN = function(x) {
+        paste0(x[1], "-", x[2])
+      }
+    )
   }
   
   #/ make contrasts
-  if (!missing(des_mat)){
-  contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(des_mat))
-  }else{
-    contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
+  if (!missing(des_mat)) {
+    contrasts <-
+      limma::makeContrasts(contrasts = combo, levels = colnames(des_mat))
+  } else{
+    contrasts <- limma::makeContrasts(contrasts = combo, levels = group)
     message("No Design Matrix provided, using only defined contrasts for matrix")
   }
   colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
@@ -109,132 +122,191 @@ make_contrasts <- function (group, control, delim="_vs_", des_mat){
 
 
 #Combo with ebayes #####
-contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="TRUE"){
-  #Define groups and baseline to make contrasts
-  #Input design and previous model fit model for it to work
-  #Toptab gives option to output results
-  
-  #/ Checks
-  suppressMessages(require(limma))
-  if(is.null(group)) stop("Error: group arg is missing")
-  
-  #/ Ensure unique group levels
-  group <- sort(unique(as.character(group)))
-  
-  #/ Define contrasts 
-  if (!missing(control)){ #compare to control
-    combo <- paste0(group,"-",  control)
-  } else{ #make all pairwise comparisons
-    combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])}) 
-  }
-  
-  #/ Make contrast matrix
-  if (!missing(des_mat)){
-    contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(design))
-  }else{ #No design + no efit
-    contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
-    message("No Design Matrix provided, using only defined contrasts for matrix")
-  } 
-  colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
-  
- 
-  #/ Model fit and deg results
-  if (!missing(efit) & !missing(des_mat) & topTab == "TRUE"){ #Requires efit and dmat args
-    fit2 <- contrasts.fit(efit, contrasts)
-    fit2 <- eBayes(fit2)
-    message("Performing ebayes fit of linear model")
-    top_results <- list() #TopTable Results
-    for (i in colnames(contrasts)){
-      top_results[[i]] <- topTable(fit2, coef = i, number = Inf)
-      limma_list <- list(contrasts = contrasts, fit2 = fit2, top_results = top_results)
+contrast_2_lm <-
+  function(group,
+           control,
+           delim = "_vs_",
+           des_mat,
+           efit,
+           topTab = "TRUE") {
+    #Define groups and baseline to make contrasts
+    #Input design and previous model fit model for it to work
+    #Toptab gives option to output results
+    
+    #/ Checks
+    suppressMessages(require(limma))
+    if (is.null(group))
+      stop("Error: group arg is missing")
+    
+    #/ Ensure unique group levels
+    group <- sort(unique(as.character(group)))
+    
+    #/ Define contrasts
+    if (!missing(control)) {
+      #compare to control
+      combo <- paste0(group, "-",  control)
+    } else{
+      #make all pairwise comparisons
+      combo <-
+        combn(group,2,
+          FUN = function(x) {
+            paste0(x[1], "-", x[2])
+          }
+        )
     }
-    message("Contrast matrix (contrasts), ebayes (fit2), top DEGs (top_results) saved in list\n
-          Subset list with either $ or [[]] for results")
-  } else if (!missing(efit) & !missing(des_mat) & topTab != "TRUE"){ #Without toptable option
-    fit2 <- contrasts.fit(efit, contrasts)
-    fit2 <- eBayes(fit2)
-    message("Performing ebayes fit of linear model")
-    limma_list <- list(contrasts = contrasts, fit2 = fit2)
-  } else if (missing(efit) | missing(des_mat)) {
-    limma_list <- list(contrasts)
-    warning("No linear model or design matrix supplied, returning contrast matrix only")
+    
+    #/ Make contrast matrix
+    if (!missing(des_mat)) {
+      contrasts <-
+        limma::makeContrasts(contrasts = combo, levels = colnames(design))
+    } else{
+      #No design + no efit
+      contrasts <- limma::makeContrasts(contrasts = combo, levels = group)
+      message("No Design Matrix provided, using only defined contrasts for matrix")
+    }
+    colnames(contrasts) <- gsub("-", delim, colnames(contrasts))
+    
+    
+    #/ Model fit and deg results
+    if (!missing(efit) &
+        !missing(des_mat) & topTab == "TRUE") {
+      #Requires efit and dmat args
+      fit2 <- contrasts.fit(efit, contrasts)
+      fit2 <- eBayes(fit2)
+      message("Performing ebayes fit of linear model")
+      top_results <- list() #TopTable Results
+      for (i in colnames(contrasts)) {
+        top_results[[i]] <- topTable(fit2, coef = i, number = Inf)
+        limma_list <-
+          list(contrasts = contrasts,
+               fit2 = fit2,
+               top_results = top_results)
+      }
+      message(
+        "Contrast matrix (contrasts), ebayes (fit2), top DEGs (top_results) saved in list\n
+          Subset list with either $ or [[]] for results"
+      )
+    } else if (!missing(efit) &
+               !missing(des_mat) & topTab != "TRUE") {
+      #Without toptable option
+      fit2 <- contrasts.fit(efit, contrasts)
+      fit2 <- eBayes(fit2)
+      message("Performing ebayes fit of linear model")
+      limma_list <- list(contrasts = contrasts, fit2 = fit2)
+    } else if (missing(efit) | missing(des_mat)) {
+      limma_list <- list(contrasts)
+      warning("No linear model or design matrix supplied, returning contrast matrix only")
+    }
+    return(limma_list)
   }
-  return(limma_list)
-}
 
 #Volcano plot function ####
 
-plot_vol <- function(deg, p = 0.05, FC = 0,
-                     lab_type= "top", genes, top = 20,
-                     title="", alpha = 0.98,
-                     colours = c("#a50000","#800000","#ef5a3a","orange","yellow")) {
-  
-  
+plot_vol <- function(deg,
+                     p = 0.05,
+                     FC = 0,
+                     lab_type = "top",
+                     genes,
+                     top = 20,
+                     title = "",
+                     alpha = 0.98,
+                     colours = c("#a50000", "#800000", "#ef5a3a", "orange", "yellow")) {
   #/ Checks
-  if (missing(deg)){
-    stop("Error: deg arg is missing. Please provide a toptable data frame")} 
+  if (missing(deg)) {
+    stop("Error: deg arg is missing. Please provide a toptable data frame")
+  }
   #if (!missing(genes) & !is.character(genes)){
   #stop("Error: label is not a character vector")}
   if (!missing(lab_type) & lab_type != c('top') & missing(genes)) {
-    stop("Error: label requires character vector with selected genes")}
+    stop("Error: label requires character vector with selected genes")
+  }
   
   #/ 1) Define sig values
   log_p <- -log10(p)
   #Adj p values #need to convert adjusted p-val to unadjusted for plot yscale
-  values <- seq(0.050,0.051, by=0.00001)
-  deg$adj.P.Val <- round(deg$adj.P.Val, 5) #This is such a janky way I apologise
-  adj.p <- deg[(deg$adj.P.Val %in% (values)),c("P.Value")] 
+  values <- seq(0.050, 0.051, by = 0.00001)
+  deg$adj.P.Val <-
+    round(deg$adj.P.Val, 5) #This is such a janky way I apologise
+  adj.p <- deg[(deg$adj.P.Val %in% (values)), c("P.Value")]
   adj.p <-  min(adj.p)
   log_adj <- -log10(adj.p)
   
   ##/Set up reg table 2)
-  
   deg <- deg %>%
-    mutate(reg =
-             case_when(
-               deg$logFC >= FC & deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
-               deg$logFC <= FC & deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
-               deg$logFC >= FC & deg$P.Value <= p ~ "Sig P <0.05",
-               deg$logFC <= FC & deg$P.Value <= p ~ "Sig P <0.05",
-               abs(deg$logFC) <= FC & deg$adj.P.Val >= p ~ "No Change",
-               abs(deg$logFC) <= FC & deg$adj.P.Val <= p ~ "No Change",
-               abs(deg$logFC) > FC & deg$adj.P.Val >p ~ "No Change")) %>%
+    mutate(
+      reg =
+        case_when(
+          deg$logFC >= FC & deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
+          deg$logFC <= FC &
+            deg$adj.P.Val <= p ~ "Sig Adj. P <0.05",
+          deg$logFC >= FC & deg$P.Value <= p ~ "Sig P <0.05",
+          deg$logFC <= FC & deg$P.Value <= p ~ "Sig P <0.05",
+          abs(deg$logFC) <= FC &
+            deg$adj.P.Val >= p ~ "No Change",
+          abs(deg$logFC) <= FC &
+            deg$adj.P.Val <= p ~ "No Change",
+          abs(deg$logFC) > FC &
+            deg$adj.P.Val > p ~ "No Change"
+        )
+    ) %>%
     mutate(reg =
              factor(reg, levels =
-                      c("Sig Adj. P <0.05", "Sig P <0.05", "No Change")))
+                      c(
+                        "Sig Adj. P <0.05", "Sig P <0.05", "No Change"
+                      )))
   
   #Define labels 3)
   
-  if (is.null(lab_type)){#No entry for lab list, currently there's no default arg
+  if (is.null(lab_type)) {
+    #No entry for lab list, currently there's no default arg
     gene_label <- c("")
-    lab_data <- NULL #Empty dataframe, need to work out how not to error
+    lab_data <-
+      NULL #Empty dataframe, need to work out how not to error
     warning("No genes highlighted")
-  } else if(lab_type == "sig"){
+  } else if (lab_type == "sig") {
     gene_label <- genes
-    lab_data <- deg[(deg$reg == "Sig P <0.05" |deg$reg == "Sig Adj. P <0.05" )
-                    & (deg$gene_name %in% genes),]
-  } else if (lab_type == "ns"){
+    lab_data <-
+      deg[(deg$reg == "Sig P <0.05" | deg$reg == "Sig Adj. P <0.05")
+          & (deg$gene_name %in% genes), ]
+  } else if (lab_type == "ns") {
     gene_label <- genes
-    lab_data <- deg[(deg$gene_name %in% genes),]}
-  else if (lab_type == "top"){
-    lab_data <- slice_min(deg,adj.P.Val,n=top)
+    lab_data <- deg[(deg$gene_name %in% genes), ]
+  }
+  else if (lab_type == "top") {
+    lab_data <- slice_min(deg, adj.P.Val, n = top)
     gene_label <- lab_data$gene_name
   }
-
+  
   #Plot Volcano 4)
   vol <-
-    deg %>% ggplot(aes(x=logFC,y=-log10(P.Value),label=gene_name))+
-    geom_point(aes(color = P.Value, alpha=alpha))+
+    deg %>% ggplot(aes(
+      x = logFC,
+      y = -log10(P.Value),
+      label = gene_name
+    )) +
+    geom_point(aes(color = P.Value, alpha = alpha)) +
     labs(title = title) +
-    theme_minimal() +theme(legend.position = "none") +
-    geom_hline(yintercept = log_p, linetype = 2.5, alpha =0.7) +
-    geom_hline(yintercept =log_adj, linetype = 2.5, alpha =0.7)+
-    geom_label_repel(data=lab_data,
-                     size=3.5,direction="both",nudge_y =1.6,nudge_x =0.1,
-                     angle= 70,vjust= 0,segment.size= 0.5,
-                     segment.color="#331002",fill="#f7f7f5")+
+    theme_minimal() + theme(legend.position = "none") +
+    geom_hline(yintercept = log_p,
+               linetype = 2.5,
+               alpha = 0.7) +
+    geom_hline(yintercept = log_adj,
+               linetype = 2.5,
+               alpha = 0.7) +
+    geom_label_repel(
+      data = lab_data,
+      size = 3.5,
+      direction = "both",
+      nudge_y = 1.6,
+      nudge_x = 0.1,
+      angle = 70,
+      vjust = 0,
+      segment.size = 0.5,
+      segment.color = "#331002",
+      fill = "#f7f7f5"
+    ) +
     scale_color_gradientn(colours = colours,
-                          values=c(0,adj.p,p,1))
+                          values = c(0, adj.p, p, 1))
   return(vol)
 } 
 
@@ -243,7 +315,9 @@ plot_vol <- function(deg, p = 0.05, FC = 0,
 #### Data Set up
 
 ```{r Set up Data, include = FALSE}
-load("/home/mari/RNA/Daniel/Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R")
+load(
+  "/home/mari/RNA/Daniel/Filter2_VAST_STAR_HTSeq_gene_meta_autosomes_mismatch_corrected_demo_minus_rRNA_globins_autosomes_2021-04-27.R"
+)
 data <- VAST_autosomes #RNAseq data set
 #rm(VAST_autosomes)
 
@@ -251,30 +325,34 @@ data <- VAST_autosomes #RNAseq data set
 str(data$samples)
 data$meta_data <- clean_names(data$meta_data)
 #Rename variables
-names(data$meta_data)[names(data$meta_data) == "days_since_challenge"] <- "time"
+names(data$meta_data)[names(data$meta_data) == "days_since_challenge"] <-
+  "time"
 #Remove NA participant IDs (these are in y - transfer over)
 #colnames(data$meta_data)<-gsub("_x","",colnames(data$meta_data))
-colnames(data$meta_data) <- stri_replace_all_regex(colnames(data$meta_data),
-                                  pattern=c('_x', 'x_',
-                                            '_e2_c3', 'e3_c3', 'e5_c5'),
-                                  replacement=c(''),
-                                  vectorize=FALSE)
+colnames(data$meta_data) <-
+  stri_replace_all_regex(
+    colnames(data$meta_data),
+    pattern = c('_x', 'x_',
+                '_e2_c3', 'e3_c3', 'e5_c5'),
+    replacement = c(''),
+    vectorize = FALSE
+  )
 
 #Remove control samples - as these have diff time points, causes a later issue with time and vaccine being linearly dependent, analyse seperately for now
 table(data$samples$study_arm)
 
-samples <- data$samples[(data$meta_data$study_arm != "CTRL"),]
-meta_data <- data$meta_data[(data$meta_data$study_arm != "CTRL"),]
-samples <- cbind(samples,meta_data)
+samples <- data$samples[(data$meta_data$study_arm != "CTRL"), ]
+meta_data <- data$meta_data[(data$meta_data$study_arm != "CTRL"), ]
+samples <- cbind(samples, meta_data)
 
-data$gene[(data$meta_data$study_arm != "CTRL"),]
-genes <- data$genes[(data$meta_data$study_arm != "CTRL"),]
+data$gene[(data$meta_data$study_arm != "CTRL"), ]
+genes <- data$genes[(data$meta_data$study_arm != "CTRL"), ]
 #filter col names in row names of metadata #row, col
 counts <- data$counts[rownames(data$counts) %in% rownames(genes),
                       colnames(data$counts) %in% meta_data$row_names]
 #filter rows (genes in counts, by the colnames (genes) in genes)
 #reform s3 DGElist object
-data <- DGEList(counts=counts,
+data <- DGEList(counts = counts,
                 genes = genes,
                 samples = samples)
 
@@ -284,17 +362,18 @@ just_vax <- data
 #Will probably have an issue with TD time point, that might need to be a seperate cohort
 table(data$meta_data$time)
 
-samples <- data$samples[(data$meta_data$time >=0),] #subset samples by metadata rows that are post-chall
-meta_data <- data$meta_data[(data$meta_data$time >=0),]
-samples <- cbind(samples,meta_data)
+samples <-
+  data$samples[(data$meta_data$time >= 0), ] #subset samples by metadata rows that are post-chall
+meta_data <- data$meta_data[(data$meta_data$time >= 0), ]
+samples <- cbind(samples, meta_data)
 
-genes <- data$genes[(data$meta_data$time >=0),]
+genes <- data$genes[(data$meta_data$time >= 0), ]
 #filter col names in row names of metadata #row, col
 counts <- data$counts[rownames(data$counts) %in% rownames(genes),
                       colnames(data$counts) %in% meta_data$row_names]
 #filter rows (genes in counts, by the colnames (genes) in genes)
 #reform s3 DGElist object
-data <- DGEList(counts=counts,
+data <- DGEList(counts = counts,
                 genes = genes,
                 samples = samples)
 
@@ -368,7 +447,7 @@ data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scal
 
 ### MDS plots
 
--   Visually examine the factors to include in you linear modelling
+-   Visually examine the factors to include in your linear model
 -   These could include technical factors such as sequencing lane/batch and also experimental factors such as time points/diagnosis
 -   Ideally you would want to see differences in time points where we expect to see DEG's, and less variation between technical factors
 -   If there is no clustering then that factor is not necessary for the lm
@@ -379,55 +458,59 @@ data <- calcNormFactors(data, method = "TMM")#Normalises count data via TMM scal
 #Sequencing lane check
 group = as.factor(data$samples$sequence_pool)
 #Set up group to plot/colours
-lcpm<-cpm(data,log=TRUE)
-col.group <-group
-levels(col.group) <-brewer.pal(nlevels(col.group),"Accent")
-col.group<-as.character(col.group)
+lcpm <- cpm(data, log = TRUE)
+col.group <- group
+levels(col.group) <- brewer.pal(nlevels(col.group), "Accent")
+col.group <- as.character(col.group)
 
-#Plot MDS 
-pdf(paste(plot_dir,"sequence_pool2.pdf",sep =""))
-plotMDS(lcpm,labels=group,col=col.group)
-title(main= "Sequencing Pool")
+#Plot MDS
+pdf(paste(plot_dir, "sequence_pool2.pdf", sep = ""))
+plotMDS(lcpm, labels = group, col = col.group)
+title(main = "Sequencing Pool")
 dev.off()
 ```
 
-#### Batch correction Notes:
+*Batch correction notes:*
 
-From the MDS plot we can see a significant batch effect in sequencing pool\
-You can account for batch corrections using limma (this might be useful for raw data in splines model later)\
-e.g `limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)`\
-Remove batch effect from raw counts and then reconvert to lcpm to get rid of negative value, which disturb the model. Re-normalise batch corrected values?\
-But for DEG analysis just include sequencing_pool as a co-variate in the model\
+-   From the MDS plot we can see a significant batch effect in sequencing pool
+
+-   You can account for batch corrections using limma (this might be useful for raw data in splines model later)
+
+-   e.g `limma::removeBatchEffect(cpm, data$meta_data$sequence_pool)`
+
+-   Thoughts: Remove batch effect from raw counts and then reconvert to lcpm to get rid of negative value, which disturb the model. Re-normalise batch corrected values?\
+    But for DEG analysis just include sequencing_pool as a co-variate in the model
 
 ```{r Time point MDS, message=FALSE}
 #Time point MDS
 group = as.factor(data$samples$time)
-col.group<-group
+col.group <- group
 #Set colours
 palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
-levels(col.group)<-palette_Dark2(length(unique(data$samples$time)))
-col.group<-as.character(col.group)
+levels(col.group) <- palette_Dark2(length(unique(data$samples$time)))
+col.group <- as.character(col.group)
 #Plot MDS
-pdf(paste(plot_dir,"time_mds.pdf",sep =""))
+pdf(paste(plot_dir, "time_mds.pdf", sep = ""))
 #starts writing a PDF to file
-plotMDS(lcpm,labels=group,col=col.group)
-title(main= "Time Point") #Some clustering around TD already :)
+plotMDS(lcpm, labels = group, col = col.group)
+title(main = "Time Point") #Some clustering around TD already :)
 dev.off()
 ```
 
 ```{r Vaccine MDS, message=FALSE}
 #Time point MDS
 group = as.factor(data$samples$study_arm)
-col.group<-group
+col.group <- group
 #Set colours
 palette_Dark2 <- colorRampPalette(brewer.pal(8, "Set2"))
-levels(col.group)<-palette_Dark2(length(unique(data$samples$time_point3)))
-col.group<-as.character(col.group)
+levels(col.group) <-
+  palette_Dark2(length(unique(data$samples$time_point3)))
+col.group <- as.character(col.group)
 #Plot MDS
-pdf(paste(plot_dir,"vaccine_mds.pdf", sep =""))
+pdf(paste(plot_dir, "vaccine_mds.pdf", sep = ""))
 #starts writing a PDF to file
-plotMDS(lcpm,labels=group,col=col.group)
-title(main= "Vaccination status") #Some clustering around TD already :)
+plotMDS(lcpm, labels = group, col = col.group)
+title(main = "Vaccination status") #Some clustering around TD already :)
 dev.off()
 ```
 
@@ -477,7 +560,7 @@ The *design matrix* contains the model coefficients (explanatory variables) we s
 
 Rows are associated with samples and columns are associated with model coefficients. These coefficients are then supplied to the corresponding linear model to estimate gene expression.
 
-Categorical variable example: \
+Categorical variable example:\
 If a sample is TD, a = 1, if it is not a TD sample, a = 0.\
 The zeros tell the model to skip estimating the model parameter for that sample. <https://www.youtube.com/watch?v=Hrr2anyK_5s&ab_channel=StatQuestwithJoshStarmer>
 
@@ -532,19 +615,24 @@ data$samples$sequence_pool <- as.factor(data$samples$sequence_pool)
 data$samples$time <- as.factor(data$samples$time)
 
 #Check for Nas
-test <- data$samples[sapply(data$samples, function(x) sum(is.na(x))),]
+test <-
+  data$samples[sapply(data$samples, function(x)
+    sum(is.na(x))), ]
 #samples have data for the design categories, however are missing levels of time factor which results in them being ommited from model.matrix - it was the vaccine rip
 
 #Model design matrix
-design <- model.matrix(~0+ time + study_arm + sex + sequence_pool, data = data$samples)
+design <-
+  model.matrix( ~ 0 + time + study_arm + sex + sequence_pool, data = data$samples)
 #Leave out diagnosis for now
 
 # 1) Test for linear dependencies ####
-ncol(design) 
+ncol(design)
 qr(design)$rank # Unequal ncol-rank = linear dependencies present
 
 # 2) Find linear dependent cols
-rankifremoved <- sapply(1:ncol(design), function (x) qr(design[,-x])$rank) #function calculates the rank of the matrix - each column
+rankifremoved <-
+  sapply(1:ncol(design), function (x)
+    qr(design[, -x])$rank) #function calculates the rank of the matrix - each column
 #Column (design factor) if removed, that result in the highest rank are the linearly dependent ones (since removing those does not decrease rank, while removing a linearly independent column does).
 which(rankifremoved != max(rankifremoved))
 
@@ -554,24 +642,22 @@ which(rankifremoved != max(rankifremoved))
 colSums(design) == 0
 
 #- subset data using col indicies found by 'which'- finds cols which (=) grepl condition (a regex search that outputs logical vector)
-test <- design[,-(which(colSums(design) == 0))]
+test <- design[, -(which(colSums(design) == 0))]
 
 # A column only has observations in x rows
 # These observations do not occur in other rows (from the same colname str_start as otherwise will be found in the covar cols)
 # Then remove these observations
-
 sum(design$time)
 
-
-design <- design[,-c(2,3,8:9)] #Just vax time points
-design <- design[,-c(12)] #Just chall also
+design <- design[, -c(2, 3, 8:9)] #Just vax time points
+design <- design[, -c(12)] #Just chall also
 #Re-check rank/ncol
-ncol(design) 
+ncol(design)
 qr(design)$rank
 
 #Tidy new design colnames
-colnames(design)<-gsub("study_arm","",colnames(design))
-colnames(design)<-gsub("time_point3","",colnames(design))
+colnames(design) <- gsub("study_arm", "", colnames(design))
+colnames(design) <- gsub("time_point3", "", colnames(design))
 colnames(design) <- gsub("\\+", "plus", colnames(design))
 ```
 
@@ -596,8 +682,8 @@ As the voom function is normalising the residuals around a fitted model, we need
 #Lower counts tend to have lower variance
 #Therefore voom normalises - flattens this trend
 #Variances are calculated by fitting a linear model to the data provided by the design matrix
-pdf(paste(plot_dir,"voom1.pdf", sep =""))
-v <- voom(data,design,plot=TRUE)
+pdf(paste(plot_dir, "voom1.pdf", sep = ""))
+v <- voom(data, design, plot = TRUE)
 dev.off()
 #more variance I think in post-chall samples
 
@@ -615,35 +701,42 @@ Account for this effect by estimating the correlation of the 'participant' varia
 
 ```{r corfit}
 #Estimate the correlation between measurements made on the same subject:
-corfit <- duplicateCorrelation(v, design=design, block=data$samples$lab_id)
+corfit <-
+  duplicateCorrelation(v, design = design, block = data$samples$lab_id)
 corfit$consensus #0.32
 
 #Voom 2 ####
 # Apply voom again on original data (with the block and correlation parameters this time)
-pdf(file = paste(plot_dir,"voom_2.pdf", sep = ""))
-v2 <- voom(data,design,
-           block = data$samples$lab_id, correlation = corfit$consensus,
-           plot=TRUE)
+pdf(file = paste(plot_dir, "voom_2.pdf", sep = ""))
+v2 <- voom(
+  data,
+  design,
+  block = data$samples$lab_id,
+  correlation = corfit$consensus,
+  plot = TRUE
+)
 dev.off()
 
-  #y, design, block = targets$Block, correlation = corfit$consensus)
+#y, design, block = targets$Block, correlation = corfit$consensus)
 
 #Lmfit 1###
-fit <- lmFit(v2, design, block = data$samples$lab_id, correlation = corfit$consensus)
+fit <-
+  lmFit(v2,
+        design,
+        block = data$samples$lab_id,
+        correlation = corfit$consensus)
 ```
 
-```{r Save/load limma voom data}
+```{r Save / load limma voom data}
 #save.image(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
-
 load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
-
 #save.image(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq_chall.RData")
 
 ```
 
 ### Contrast Matrices
 
-Used in conjunction with a design matrix to calculate specific values of interest between estimated parameters. \
+Used in conjunction with a design matrix to calculate specific values of interest between estimated parameters.\
 The matrix is set up as so that rows are associated with model parameters and columns indicate whether that data is to be used in the comparison
 
 ```{r All contrast matricies}
@@ -653,9 +746,15 @@ The matrix is set up as so that rows are associated with model parameters and co
 #Comparing D1, D7 and 28 days post-vac with baseline
 #results <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design)
 #results <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"),efit=fit, des_mat = design)
-results <- contrast_2_lm(group = groups, control = c("time0"),efit=fit, des_mat = design) #all times
-groups <- colnames(design[,grep("time",colnames(design))])
-groups <- colnames(design[,grep("time0v",colnames(design))])
+results <-
+  contrast_2_lm(
+    group = groups,
+    control = c("time0"),
+    efit = fit,
+    des_mat = design
+  ) #all times
+groups <- colnames(design[, grep("time", colnames(design))])
+groups <- colnames(design[, grep("time0v", colnames(design))])
 
 
 cm <- results$contrasts
@@ -670,7 +769,7 @@ plotSA(fit2) #check variance post-voom
 #### Plot Pipeline
 
 -   Input toptable results file
--   Speficy directories + plot names
+-   Specify directories + plot names
 -   Option to modify highlighted genes/sig levels
 
 ```{r Volcano Plots}
@@ -678,29 +777,45 @@ plotSA(fit2) #check variance post-voom
 #Final vols ####
 
 # UPDATE file dirs and data
-#system("mkdir ~/GWAS_22/new_gwas/Plots/DEG/volcanos/h12")
+# system("mkdir ~/GWAS_22/new_gwas/Plots/DEG/volcanos/h12")
 plot_dir <- c("~/GWAS_22/new_gwas/Plots/DEG/volcanos/V1/")
 plot_title <- c("24h Post-vaccination")
 factor <- c("Diagnosis")
 
 deg <- toptables$V1nTD_vs_V1TD
-#UPDATE
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#Modify gene names
+# UPDATE
+# Modify gene names
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13B", "BAFF")
 deg$gene_name <- str_replace(deg$gene_name, "TNFSF13", "APRIL")
-genes_neut <- c("APRIL", "BAFF","IL1B")
-genes_fc <- c("FCGR3A","FCGR3C","FCAR","FCGR1B","FCGR2A", "FCGR2B", "FCGR2C", "FCGR1A")
-
-
+genes_neut <- c("APRIL", "BAFF", "IL1B")
+genes_fc <-
+  c("FCGR3A",
+    "FCGR3C",
+    "FCAR",
+    "FCGR1B",
+    "FCGR2A",
+    "FCGR2B",
+    "FCGR2C",
+    "FCGR1A")
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 top <- plot_vol(deg, lab = 'top', title = plot_title)
-neut <-plot_vol(deg, lab = 'sig',genes = genes_neut, title = plot_title)
-fc <- plot_vol(deg, lab = 'sig',genes = genes_fc, title = plot_title)
-ns <- plot_vol(deg, lab = 'ns',genes = genes_fc, title = plot_title)
+neut <-
+  plot_vol(deg,
+           lab = 'sig',
+           genes = genes_neut,
+           title = plot_title)
+fc <-
+  plot_vol(deg,
+           lab = 'sig',
+           genes = genes_fc,
+           title = plot_title)
+ns <- plot_vol(deg,
+               lab = 'ns',
+               genes = genes_fc,
+               title = plot_title)
 
 
 #Save plots ####
@@ -712,12 +827,12 @@ pdf(file = paste(plot_dir, factor, "sig_fc.pdf", sep = ""))
 fc
 dev.off()
 
-pdf(file = paste(plot_dir, factor,"ns_fc.pdf", sep = ""))
+pdf(file = paste(plot_dir, factor, "ns_fc.pdf", sep = ""))
 ns
 dev.off()
 ns
 
-pdf(file = paste(plot_dir, factor,"topgenes.pdf", sep = ""))
+pdf(file = paste(plot_dir, factor, "topgenes.pdf", sep = ""))
 top
 dev.off()
 fc
@@ -765,43 +880,52 @@ Did nTD participants also have less APRIL/BAFF expression? If I have the model w
 load(file = "~/RNA/Daniel/diff_expr_results/VAST_RNAseq.RData")
 
 data$samples$time <- as.factor(data$samples$time_point3)
-tableexpsign <- model.matrix(~Time + Array_experiment + age + Sex + StudyArm, data = tableexpsign_12h)
+tableexpsign <-
+  model.matrix( ~ Time + Array_experiment + age + Sex + StudyArm, data = tableexpsign_12h)
 
 #Don't need to filter data of time point as contrast matrix will just put in a 0 if I dont specify it
 
 #design#
 
-Group <- factor(paste(Time_point, Treatment, sep="."))
+Group <- factor(paste(Time_point, Treatment, sep = "."))
 
 
-design <- model.matrix(~ 0 + Group + Individual)
+design <- model.matrix( ~ 0 + Group + Individual)
 
-vax_time <- paste0(samples$study_arm, samples$time_point3) #compare D0_TCV  D0_ViPS
-vax_diag <- paste0(samples$study_arm, samples$diagnosis) #compare D0_TCV  D0_ViPS
+vax_time <-
+  paste0(samples$study_arm, samples$time_point3) #compare D0_TCV  D0_ViPS
+vax_diag <-
+  paste0(samples$study_arm, samples$diagnosis) #compare D0_TCV  D0_ViPS
 time_diag <- paste0(samples$time_point3, samples$diagnosis)
 
 #design <- model.matrix(~0+ time_point3 + study_arm + diagnosis + sex + sequence_pool, data = data$samples)
 
 
-design <- model.matrix(~0+ time_diag + study_arm + diagnosis + sex + sequence_pool, data = data$samples)
+design <-
+  model.matrix( ~ 0 + time_diag + study_arm + diagnosis + sex + sequence_pool,
+                data = data$samples)
 
-colnames(design)<-gsub("time_diag","",colnames(design))
-colnames(design)<-gsub("study_arm","",colnames(design))
-colnames(design)<-gsub("time_point3","",colnames(design))
+colnames(design) <- gsub("time_diag", "", colnames(design))
+colnames(design) <- gsub("study_arm", "", colnames(design))
+colnames(design) <- gsub("time_point3", "", colnames(design))
 colnames(design) <- gsub("D0\\+", "", colnames(design))
 colnames(design) <- gsub("diagnosis", "diag_", colnames(design))
 colnames(design) <- gsub("12h", "h12", colnames(design))
 
-design <- design[,-c(grep("UNKNOWN",colnames(design)))]
-design <- design[,-c(14,17)] #-control  #-dag_TD                      
-                          
+design <- design[, -c(grep("UNKNOWN", colnames(design)))]
+design <-
+  design[, -c(14, 17)] #-control  #-dag_TD
+
 
 #compare Time_0 - Time_0.5 _TD
 #contrast_matrix <- makeContrasts('h12TD-h12nTD',levels = design)
 
 #fit 1
 
-results <- contrast_2_lm(group = c("V1TD", "V1nTD"), efit=fit, des_mat = design)
+results <-
+  contrast_2_lm(group = c("V1TD", "V1nTD"),
+                efit = fit,
+                des_mat = design)
 
 cm <- results$contrasts
 fit2 <- results$fit2
@@ -818,24 +942,31 @@ Manual attempts
 
 ```{r}
 
-mean(eset["g1", labs %in% c("a","b")]) - mean(eset["g1",labs%in%c("c","d")])
+mean(eset["g1", labs %in% c("a", "b")]) - mean(eset["g1", labs %in% c("c", "d")])
 [1] 0.3015693
 
 # first gene - AveExpr
-mean(eset["g1",])
+mean(eset["g1", ])
 
 
-#need limma for all the modelling thoug
-Fc_interest2 %>% filter(Diagnosis == "TD") %>% 
-  ggplot(aes(x= Time, y= Exprs, group = Time, colour = Diagnosis)) + geom_boxplot(outlier.shape = NA) + scale_x_continuous(limits = c(-0.5, 16.5), breaks = seq(0,28,2)) + facet_wrap(~Fc_Receptor) +
-  labs(y = "Normalised Gene Expression", x = "Days Post-Challenge", title = "FcR Expression in TD Participants") +scale_colour_manual(values=c("sandybrown")) + theme(legend.position = "none")
+#need limma for all the modelling though
+Fc_interest2 %>% filter(Diagnosis == "TD") %>%
+  ggplot(aes(
+    x = Time,
+    y = Exprs,
+    group = Time,
+    colour = Diagnosis
+  )) + geom_boxplot(outlier.shape = NA) + scale_x_continuous(limits = c(-0.5, 16.5), breaks = seq(0, 28, 2)) + facet_wrap( ~
+                                                                                                                             Fc_Receptor) +
+  labs(y = "Normalised Gene Expression", x = "Days Post-Challenge", title = "FcR Expression in TD Participants") +
+  scale_colour_manual(values = c("sandybrown")) + theme(legend.position = "none")
 
 
- library(splines)
- X <- ns(samples$time, df=5)
-Then fit separate curves for the control and treatment groups:
-Group <- factor(targets$Group)
-design <- model.matrix(~Group*X)
+library(splines)
+X <- ns(samples$time, df = 5)
+Then fit separate curves for the control and treatment groups:Group <-
+  factor(targets$Group)
+design <- model.matrix( ~ Group * X)
 fit <- lmFit(y, design)
 fit <- eBayes(fit)
 
