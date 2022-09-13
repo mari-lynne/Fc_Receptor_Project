@@ -74,11 +74,8 @@ plot_vol <- function(deg, p = 0.05, FC = 0,
   return(vol)
 } 
   
-  
-  
-  
-#/ Error checking 5/9
-#/ ISSUE - labels not plotting for sig settings
 
-#replace all gene_col with gene_name
-#Updates works, fix gene col setting later
+
+
+
+
