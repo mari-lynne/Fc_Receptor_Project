@@ -67,10 +67,10 @@ ld_check <- function(mat,
   for (i in 1:ncol(out)) {
     if (filter == 1 && length(unique(out[, i])) == 1) {
       print(paste0("Linear dependent cols =", c_names[i]))
-      x <- str_extract(c_names[1],"\\d")
+      x <- as.numeric(str_extract(c_names[1],"\\d"))
     } else if ((filter == 2||3) && length(unique(out[, i])) == 1) {
       print(paste0("Linear dependent cols =", c_names[i]))
-      x <- str_extract(c_names[1],"\\d$")
+      x <- as.numeric(str_extract(c_names[1],"\\d$"))
     }
   }
   
@@ -92,45 +92,45 @@ ld_check <- function(mat,
   #/ 6) Column removal check
   t1 <- c(x,y,z)
   print(t1)
-  message(paste("removing problem columns: ", t1," from matrix"))
-  ind_mat <- mat[,t1]
+  message(paste0("removing problem columns: ", t1," from matrix"))
+  
+  #/ 7) output filtered matrix as list 
   print(paste0("Updated ncols = ",ncol(mat)))
   print(paste0("Updated rank = ",qr(mat)$rank))
+  ind_mat <- mat[,c(t1)]
+  #mat_list <- list(ind_mat = ind_mat)
   return(ind_mat)
+  
 }
 
 
 ld_check(mat=dmat)
 
-#debug(ld_check)
+debug(ld_check)
 
-mat[,c(x,y,z)]
+# Errors ####
 
-t <- c(x,y,z)
+# 1) Subscript filter out of bounds
+#t1 <- paste(x,y,z, sep = ",")
+# FIX
+# This was because x was a character string from regex, y/z were intergers
+# convert x to numeric - subset works
 
-mat[,t]
+# 11/09/22
+# 2) Matrix not returning to global environment
+# Matrix filter now works, however can't return r object
 
-paste0(qt, t, c(qt,//,))
-rm(z)
-
-
-addQuotes_<-function(str,qt="'"){
-  return(strp<-paste(qt,str,qt,sep=''));
-}
-
-
-
-#Updates 
+#Updates ####
 
 #filter - poss Option to filter ld columns from matrix
 # recode non-numeric vars to numeric so we can add :)
 # If there are lots of LD columns - just show the most common denominator
 # If col x or + by other col (pairwise) = value of column in matrix remove
-# Null check
-# Rank check
-colSums(mat) == 0
 
 #Testing ####
+
+colSums(mat) == 0
+
 a = c(1, 0, 0, 1)
 b = c(0, 1, 1, 0)
 c = c(1, 1, 0, 1)
@@ -142,8 +142,4 @@ mat <- matrix(c(a, b, c, d),
 mat <- cbind(mat,(c(0,0,0,0)))
 mat <- cbind(mat,(c(0,0,0,1)))
 
-str_extract(c_names[1],"\\d") #just take first mismatch by default
-#will therefore remove first col
-#change to second d as option
-str_extract(c_names[1],"\\d$") #works :)
-
+  
