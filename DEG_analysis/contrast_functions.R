@@ -37,7 +37,7 @@ make_contrasts <- function (group, control, delim="_vs_", des_mat){
 #results <- make_contrasts(group = c("V7", "V1", "D0", "V0"), control = c("V0"), des_mat = design)
 
 #Combo with ebayes #####
-contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="TRUE"){
+contrast_2_lm <- function(group, control, delim="_vs_", design, fit, topTab="TRUE"){
   #Define groups and baseline to make contrasts
   #Input design and previous model fit model for it to work
   #Toptab gives option to output results
@@ -57,7 +57,7 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
   }
   
   #/ Make contrast matrix
-  if (!missing(des_mat)){
+  if (!missing(design)){
     contrasts<- limma::makeContrasts(contrasts=combo, levels=colnames(design))
   }else{ #No design + no efit
     contrasts<- limma::makeContrasts(contrasts=combo, levels=group)
@@ -67,8 +67,8 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
   
  
   #/ Model fit and deg results
-  if (!missing(efit) & !missing(des_mat) & topTab == "TRUE"){ #Requires efit and dmat args
-    fit2 <- contrasts.fit(efit, contrasts)
+  if (!missing(fit) & !missing(design) & topTab == "TRUE"){ #Requires fit and dmat args
+    fit2 <- contrasts.fit(fit, contrasts)
     fit2 <- eBayes(fit2)
     message("Performing ebayes fit of linear model")
     top_results <- list() #TopTable Results
@@ -78,12 +78,12 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
     }
     message("Contrast matrix (contrasts), ebayes (fit2), top DEGs (top_results) saved in list\n
           Subset list with either $ or [[]] for results")
-  } else if (!missing(efit) & !missing(des_mat) & topTab != "TRUE"){ #Without toptable option
-    fit2 <- contrasts.fit(efit, contrasts)
+  } else if (!missing(fit) & !missing(design) & topTab != "TRUE"){ #Without toptable option
+    fit2 <- contrasts.fit(fit, contrasts)
     fit2 <- eBayes(fit2)
     message("Performing ebayes fit of linear model")
     limma_list <- list(contrasts = contrasts, fit2 = fit2)
-  } else if (missing(efit) | missing(des_mat)) {
+  } else if (missing(fit) | missing(design)) {
     limma_list <- list(contrasts)
     warning("No linear model or design matrix supplied, returning contrast matrix only")
   }
@@ -91,7 +91,18 @@ contrast_2_lm <- function(group, control, delim="_vs_", des_mat, efit, topTab="T
 }
 
 #Output testing 
-results2 <- contrast_2_lm(group = c("V7", "V1", "D0"), control = c("V0"), efit=fit, des_mat = design)
+results2 <- contrast_2_lm(group = c("V7nTD", "V1nTD", "D0nTD"), control = c("V0nTD"), fit=fit, design=design)
+
+#6/9/22
+#Error - all adj.p vals = 0.93
+toptables <- results2$top_results
+deg <- toptables$D0nTD_vs_V0nTD #adj.pvalues here - this has some around 0.05
+
+
+results <- contrast_2_lm(group = c("h12TD"), control = c("h12nTD"),fit=fit, design = design) 
+top <- results$top_results
+test <- top$h12TD_vs_h12nTD
+
 
 # Update 5/9/22
 
@@ -119,7 +130,7 @@ make_contrasts <- function (group="all", control, delim="_vs_", des_mat){
     combo <- paste0(group,"-",  control)
   } else if (!missing(control) & group =="all" & !missing(des_mat)){ #/ if control var is present, and no groups specified, compare all levels of design matrix as groups to control
     combo <- combn(colnames(des_mat), 2, FUN = function(x){paste0(x[1], "-", x[2])})
-    combo <- grep(control, combo) #only keeping comparisons to control
+    combo <- colnames(design[,grep(control,colnames(des_mat))])
   } else if (missing(control)){ #make all comparisons using combn function
     combo <- combn(group, 2, FUN = function(x){paste0(x[1], "-", x[2])}) #This is subsetting fields to paste
   }
@@ -139,4 +150,4 @@ make_contrasts <- function (group="all", control, delim="_vs_", des_mat){
   return(contrasts)
 }
 
-tests <- make_contrasts(group = c("time7", "time4"),control = c("time0"), des_mat = design)
+tests <- make_contrasts(control = c("time0"), des_mat = design)
