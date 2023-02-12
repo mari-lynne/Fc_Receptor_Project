@@ -183,3 +183,14 @@ levels(geno$pheno) <- c("TD", "nTD")
 #dodged graph ##
 geno %>% filter(ID == "rs115297732") %>% ggplot(aes(x=genotype, y=counts, fill=pheno)) + geom_bar(stat="identity", color="black", position=position_dodge()) + theme_light()
 
+# eqtl
+
+setwd("~/GWAS_22/Fc_receptor/data")
+
+
+pheno_exprs <- fread("pheno_express_T1T2.txt")
+geno <- fread("Fc_genoD0.txt")
+
+
+
+

@@ -409,7 +409,7 @@ data2 <- data[keep.exprs, keep.lib.sizes=FALSE] #subset og data
 dim(data2)#12969 genes across 521 participants
 ```
 
-*Visualise the frequency of counts across study before and after filtering*
+Visualise the frequency of counts across study before and after filtering
 
 ```{r Visualise raw and filtered count data, warning=FALSE}
 lcpm.cutoff <- log2(10/M + 2/L)
@@ -560,7 +560,7 @@ The *design matrix* contains the model coefficients (explanatory variables) we s
 
 Rows are associated with samples and columns are associated with model coefficients. These coefficients are then supplied to the corresponding linear model to estimate gene expression.
 
-Categorical variable [example:\\](example:\){.uri} If a sample is TD, a = 1, if it is not a TD sample, a = 0.\
+Categorical variable [[example:\\\\](example:\){.uri}]([example:\\](example:)%7B.uri%7D){.uri} If a sample is TD, a = 1, if it is not a TD sample, a = 0.\
 The zeros tell the model to skip estimating the model parameter for that sample. <https://www.youtube.com/watch?v=Hrr2anyK_5s&ab_channel=StatQuestwithJoshStarmer>
 
 **Matrix formatting**
